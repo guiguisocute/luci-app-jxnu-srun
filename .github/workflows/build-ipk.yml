@@ -42,11 +42,15 @@ jobs:
 
       - name: Inject package
         run: |
+          echo "Workspace: $(pwd)"
+          ls -la
           mkdir -p openwrt/package/luci-app-jxnu-srun
           rsync -a --delete \
             --exclude ".git" \
             --exclude ".github" \
             --exclude "__pycache__" \
+            --exclude "openwrt" \
+            --exclude "artifacts" \
             ./ openwrt/package/luci-app-jxnu-srun/
 
       - name: Update feeds
