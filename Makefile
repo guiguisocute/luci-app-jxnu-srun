@@ -7,7 +7,7 @@ PKG_RELEASE:=1
 include $(INCLUDE_DIR)/package.mk
 
 LUCI_TITLE:=师大校园网
-LUCI_DEPENDS:=+python3
+LUCI_DEPENDS:=+python3-light
 LUCI_PKGARCH:=all
 LUCI_DESCRIPTION:=LuCI app for JXNU SRun: auto login, night hotspot switching, backoff retry, and developer switch testing.
 
