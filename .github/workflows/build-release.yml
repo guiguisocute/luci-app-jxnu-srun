@@ -1,20 +1,16 @@
-﻿name: pre-release build
+name: Version Release Build
 
 on:
   workflow_dispatch:
     inputs:
       openwrt_version:
         description: "OpenWrt release version"
-        required: false
+        required: true
         default: "23.05.5"
       version:
-        description: "Version of this build."
-        required: false
+        description: "Version of this release build."
+        required: true
         default: ""
-      publish_release:
-        description: "Publish to GitHub Release"
-        required: false
-        default: "false"
 
 permissions:
   contents: write
@@ -65,7 +61,6 @@ jobs:
           echo "sdk_name=${SDK_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Apply version to Makefile
-        if: github.event.inputs.version != ''
         run: |
           VERSION='${{ github.event.inputs.version }}'
           awk -v ver="$VERSION" '
@@ -150,16 +145,8 @@ jobs:
 
   publish:
     needs: build
-    if: github.event.inputs.publish_release == 'true'
     runs-on: ubuntu-22.04
     steps:
-      - name: Validate release version
-        run: |
-          if [ -z "${{ github.event.inputs.version }}" ]; then
-            echo "version is required when publish_release=true"
-            exit 1
-          fi
-
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
@@ -167,7 +154,7 @@ jobs:
           pattern: luci-app-jxnu-srun-ipk-*
           merge-multiple: true
 
-      - name: Publish pre-release and upload assets
+      - name: Publish release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version }}
@@ -177,12 +164,12 @@ jobs:
             A new OpenWRT extension that helps you connect to JXNU SRun's network service.
             一款新的 OpenWRT 扩展程序，可帮助您连接到江西师范大学校园网。
 
-            **⚠本版本为测试版
-            This is a testing version.**
+            **This is the first usable Stable Version release of the software.
+            此版本为第一个可用的正式版！**
 
-            # 文件介绍：
+            文件介绍：
             `rockchip_armv8` 为针对armv8小型设备构建的软件包；
             `x86_64` 为针对一般x86电脑构建的软件包；
             其他框架请自行fork本项目，修改.github/workflow中build文件相关信息。
-          prerelease: true
+          prerelease: false
           overwrite_files: true
