@@ -4,39 +4,35 @@ local util = require "luci.util"
 local jsonc = require "luci.jsonc"
 
 local CONFIG_FILE = "/usr/lib/jxnu_srun/config.json"
+local DEFAULTS_FILE = "/usr/lib/jxnu_srun/defaults.json"
 
-local DEFAULTS = {
-    enabled = "0",
-    user_id = "",
-    operator = "cucc",
-    password = "",
-    quiet_hours_enabled = "1",
-    quiet_start = "00:00",
-    quiet_end = "06:00",
-    force_logout_in_quiet = "1",
-    developer_mode = "0",
-    failover_enabled = "1",
-    sta_iface = "",
-    campus_ssid = "jxnu_stu",
-    campus_encryption = "none",
-    campus_key = "",
-    hotspot_ssid = "",
-    hotspot_encryption = "psk2",
-    hotspot_key = "",
-    backoff_enable = "1",
-    backoff_max_retries = "0",
-    backoff_initial_duration = "10",
-    backoff_max_duration = "600",
-    backoff_exponent_factor = "1.5",
-    backoff_inter_const_factor = "0",
-    backoff_outer_const_factor = "0",
-    base_url = "http://172.17.1.2",
-    ac_id = "1",
-    n = "200",
-    type = "1",
-    enc = "srun_bx1",
-    interval = "180",
-}
+local function load_defaults()
+    local raw = fs.readfile(DEFAULTS_FILE)
+    if raw then
+        local parsed = jsonc.parse(raw)
+        if type(parsed) == "table" then
+            local out = {}
+            for k, v in pairs(parsed) do
+                out[k] = tostring(v)
+            end
+            return out
+        end
+    end
+    return {
+        enabled = "0", user_id = "", operator = "cucc", password = "",
+        quiet_hours_enabled = "1", quiet_start = "00:00", quiet_end = "06:00",
+        force_logout_in_quiet = "1", developer_mode = "0", failover_enabled = "1",
+        sta_iface = "", campus_ssid = "jxnu_stu", campus_encryption = "none",
+        campus_key = "", hotspot_ssid = "", hotspot_encryption = "psk2",
+        hotspot_key = "", backoff_enable = "1", backoff_max_retries = "0",
+        backoff_initial_duration = "10", backoff_max_duration = "600",
+        backoff_exponent_factor = "1.5", backoff_inter_const_factor = "0",
+        backoff_outer_const_factor = "0", base_url = "http://172.17.1.2",
+        ac_id = "1", n = "200", type = "1", enc = "srun_bx1", interval = "180",
+    }
+end
+
+local DEFAULTS = load_defaults()
 
 local function ensure_json_file()
     local dir = CONFIG_FILE:match("^(.+)/[^/]+$")
@@ -171,7 +167,7 @@ local function bind_flag(opt, key)
         return cfg[key] == "1" and "1" or "0"
     end
     function opt.write(self, section, value)
-        set_value(key, "1")
+        set_value(key, (value == "1") and "1" or "0")
     end
     function opt.remove(self, section)
         set_value(key, "0")

@@ -41,39 +41,32 @@ ONLINE_CHECK_MAX_SECONDS = 60
 DISCONNECT_RETRY_DELAY_SECONDS = 3
 CAMPUS_FIXED_SSID = "jxnu_stu"
 CAMPUS_FIXED_ENCRYPTION = "none"
+DEFAULTS_JSON_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults.json")
 
-DEFAULTS = {
-    "enabled": "0",
-    "user_id": "",
-    "operator": "cucc",
-    "password": "",
-    "quiet_hours_enabled": "1",
-    "quiet_start": "00:00",
-    "quiet_end": "06:00",
-    "force_logout_in_quiet": "1",
-    "developer_mode": "0",
-    "failover_enabled": "1",
-    "sta_iface": "",
-    "campus_ssid": "jxnu_stu",
-    "campus_encryption": "none",
-    "campus_key": "",
-    "hotspot_ssid": "",
-    "hotspot_encryption": "psk2",
-    "hotspot_key": "",
-    "backoff_enable": "1",
-    "backoff_max_retries": "0",
-    "backoff_initial_duration": "10",
-    "backoff_max_duration": "600",
-    "backoff_exponent_factor": "1.5",
-    "backoff_inter_const_factor": "0",
-    "backoff_outer_const_factor": "0",
-    "base_url": "http://172.17.1.2",
-    "ac_id": "1",
-    "n": "200",
-    "type": "1",
-    "enc": "srun_bx1",
-    "interval": "180",
-}
+
+def _load_defaults():
+    try:
+        with open(DEFAULTS_JSON_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {k: str(v) for k, v in data.items()}
+    except Exception:
+        pass
+    return {
+        "enabled": "0", "user_id": "", "operator": "cucc", "password": "",
+        "quiet_hours_enabled": "1", "quiet_start": "00:00", "quiet_end": "06:00",
+        "force_logout_in_quiet": "1", "developer_mode": "0", "failover_enabled": "1",
+        "sta_iface": "", "campus_ssid": "jxnu_stu", "campus_encryption": "none",
+        "campus_key": "", "hotspot_ssid": "", "hotspot_encryption": "psk2",
+        "hotspot_key": "", "backoff_enable": "1", "backoff_max_retries": "0",
+        "backoff_initial_duration": "10", "backoff_max_duration": "600",
+        "backoff_exponent_factor": "1.5", "backoff_inter_const_factor": "0",
+        "backoff_outer_const_factor": "0", "base_url": "http://172.17.1.2",
+        "ac_id": "1", "n": "200", "type": "1", "enc": "srun_bx1", "interval": "180",
+    }
+
+
+DEFAULTS = _load_defaults()
 
 OPERATORS = {"cmcc", "ctcc", "cucc", "xn"}
 PAD_CHAR = "="
@@ -138,57 +131,32 @@ def parse_non_negative_float(value, default_value):
 
 def load_config():
     raw = load_json_raw_config()
-    cfg = {k: str(raw.get(k, v)) for k, v in DEFAULTS.items()}
-    cfg["enabled"] = str(cfg["enabled"]).strip()
-    cfg["user_id"] = str(cfg["user_id"]).strip()
-    cfg["operator"] = str(cfg["operator"]).strip().lower()
-    cfg["password"] = str(cfg["password"]).strip()
-    cfg["quiet_hours_enabled"] = str(cfg["quiet_hours_enabled"]).strip()
-    cfg["force_logout_in_quiet"] = str(cfg["force_logout_in_quiet"]).strip()
-    cfg["quiet_start"] = str(cfg.get("quiet_start", "")).strip()
-    cfg["quiet_end"] = str(cfg.get("quiet_end", "")).strip()
-    cfg["failover_enabled"] = str(cfg["failover_enabled"]).strip()
+    cfg = {k: str(raw.get(k, v)).strip() for k, v in DEFAULTS.items()}
 
-    cfg["sta_iface"] = str(cfg.get("sta_iface", "")).strip()
+    cfg["operator"] = cfg["operator"].lower()
+    if cfg["operator"] not in OPERATORS:
+        cfg["operator"] = "cucc"
+    cfg["base_url"] = cfg["base_url"].rstrip("/")
     cfg["campus_ssid"] = CAMPUS_FIXED_SSID
     cfg["campus_encryption"] = CAMPUS_FIXED_ENCRYPTION
     cfg["campus_key"] = ""
-    cfg["hotspot_ssid"] = str(cfg.get("hotspot_ssid", "")).strip()
-    cfg["hotspot_encryption"] = str(cfg.get("hotspot_encryption", "psk2")).strip().lower()
-    cfg["hotspot_key"] = str(cfg.get("hotspot_key", "")).strip()
-    cfg["backoff_enable"] = str(cfg.get("backoff_enable", "1")).strip()
-    cfg["backoff_max_retries"] = str(cfg.get("backoff_max_retries", "0")).strip()
-    cfg["backoff_initial_duration"] = str(cfg.get("backoff_initial_duration", "10")).strip()
-    cfg["backoff_max_duration"] = str(cfg.get("backoff_max_duration", "600")).strip()
-    cfg["backoff_exponent_factor"] = str(cfg.get("backoff_exponent_factor", "1.5")).strip()
-    cfg["backoff_inter_const_factor"] = str(cfg.get("backoff_inter_const_factor", "0")).strip()
-    cfg["backoff_outer_const_factor"] = str(cfg.get("backoff_outer_const_factor", "0")).strip()
-
-    cfg["base_url"] = str(cfg["base_url"]).strip().rstrip("/")
-    cfg["ac_id"] = str(cfg["ac_id"]).strip()
-    cfg["n"] = str(cfg["n"]).strip()
-    cfg["type"] = str(cfg["type"]).strip()
-    cfg["enc"] = str(cfg["enc"]).strip()
-    cfg["interval"] = str(cfg["interval"]).strip()
-
-    if cfg["operator"] not in OPERATORS:
-        cfg["operator"] = "cucc"
+    cfg["hotspot_encryption"] = cfg["hotspot_encryption"].lower()
 
     cfg["username"] = ""
     if cfg["user_id"]:
         cfg["username"] = cfg["user_id"] + "@" + cfg["operator"]
 
     cfg["campus_encryption"] = normalize_wifi_encryption(CAMPUS_FIXED_ENCRYPTION)
-    cfg["hotspot_encryption"] = normalize_wifi_encryption(cfg.get("hotspot_encryption", "psk2"))
-    cfg["backoff_max_retries"] = parse_non_negative_int(cfg.get("backoff_max_retries", "0"), 0)
-    cfg["backoff_initial_duration"] = parse_non_negative_float(cfg.get("backoff_initial_duration", "10"), 10.0)
-    cfg["backoff_max_duration"] = parse_non_negative_float(cfg.get("backoff_max_duration", "600"), 600.0)
-    cfg["backoff_exponent_factor"] = parse_non_negative_float(cfg.get("backoff_exponent_factor", "1.5"), 1.5)
-    cfg["backoff_inter_const_factor"] = parse_non_negative_float(cfg.get("backoff_inter_const_factor", "0"), 0.0)
-    cfg["backoff_outer_const_factor"] = parse_non_negative_float(cfg.get("backoff_outer_const_factor", "0"), 0.0)
+    cfg["hotspot_encryption"] = normalize_wifi_encryption(cfg["hotspot_encryption"])
+    cfg["backoff_max_retries"] = parse_non_negative_int(cfg["backoff_max_retries"], 0)
+    cfg["backoff_initial_duration"] = parse_non_negative_float(cfg["backoff_initial_duration"], 10.0)
+    cfg["backoff_max_duration"] = parse_non_negative_float(cfg["backoff_max_duration"], 600.0)
+    cfg["backoff_exponent_factor"] = parse_non_negative_float(cfg["backoff_exponent_factor"], 1.5)
+    cfg["backoff_inter_const_factor"] = parse_non_negative_float(cfg["backoff_inter_const_factor"], 0.0)
+    cfg["backoff_outer_const_factor"] = parse_non_negative_float(cfg["backoff_outer_const_factor"], 0.0)
 
-    cfg["quiet_start"], cfg["quiet_start_minutes"] = normalize_hhmm(cfg.get("quiet_start", ""), "00:00")
-    cfg["quiet_end"], cfg["quiet_end_minutes"] = normalize_hhmm(cfg.get("quiet_end", ""), "06:00")
+    cfg["quiet_start"], cfg["quiet_start_minutes"] = normalize_hhmm(cfg["quiet_start"], "00:00")
+    cfg["quiet_end"], cfg["quiet_end_minutes"] = normalize_hhmm(cfg["quiet_end"], "06:00")
 
     try:
         interval = int(cfg["interval"])
@@ -417,7 +385,26 @@ def humanize_http_errors(url, errors):
     return "无法访问认证网关 %s：%s。技术详情：%s" % (host, "；".join(reasons), details_text)
 
 
-def http_get(url, params=None, timeout=5):
+def resolve_bind_ip(url, cfg):
+    host = extract_host_from_url(url)
+    bind_ip = get_local_ip_for_target(host) if host else None
+    host_ip = pick_valid_ip(host)
+    if host_ip:
+        try:
+            if ipaddress.ip_address(host_ip).is_private:
+                sta_section = get_sta_section(cfg)
+                if sta_section:
+                    sta_net = get_network_interface_from_sta_section(sta_section)
+                    if sta_net:
+                        sta_ip = get_ipv4_from_network_interface(sta_net)
+                        if sta_ip:
+                            bind_ip = sta_ip
+        except ValueError:
+            pass
+    return bind_ip
+
+
+def http_get(url, params=None, timeout=5, bind_ip=None):
     if params:
         query = _urlencode(params)
         url = url + ("&" if "?" in url else "?") + query
@@ -432,24 +419,9 @@ def http_get(url, params=None, timeout=5):
         except Exception as exc:
             errors.append("urllib: %s" % str(exc))
 
-    host = extract_host_from_url(url)
-    bind_ip = get_local_ip_for_target(host) if host else None
-
-    # For private portal hosts, prefer the STA profile interface IP.
-    host_ip = pick_valid_ip(host)
-    if host_ip:
-        try:
-            if ipaddress.ip_address(host_ip).is_private:
-                cfg = load_config()
-                sta_section = get_sta_section(cfg)
-                if sta_section:
-                    sta_net = get_network_interface_from_sta_section(sta_section)
-                    if sta_net:
-                        sta_ip = get_ipv4_from_network_interface(sta_net)
-                        if sta_ip:
-                            bind_ip = sta_ip
-        except ValueError:
-            pass
+    if bind_ip is None:
+        host = extract_host_from_url(url)
+        bind_ip = get_local_ip_for_target(host) if host else None
 
     candidates = [
         ("/usr/bin/wget", "wget"),
@@ -754,6 +726,27 @@ def profiles_match(current, expected):
     return True
 
 
+def _find_sta_by_ssid(ssid, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    target = str(ssid or "").strip()
+    if not target:
+        return None
+    for sec in sorted(data.keys()):
+        opts = data[sec]
+        if str(opts.get("mode", "")).strip().lower() != "sta":
+            continue
+        if str(opts.get("ssid", "")).strip() == target:
+            return sec
+    return None
+
+
+def _toggle_sta_sections(enable_sec, disable_sec):
+    run_cmd(["uci", "set", "wireless.%s.disabled=0" % enable_sec])
+    if disable_sec and disable_sec != enable_sec:
+        run_cmd(["uci", "set", "wireless.%s.disabled=1" % disable_sec])
+    return commit_reload_wireless()
+
+
 def switch_sta_profile(cfg, expect_hotspot):
     data = parse_wireless_iface_data()
     section = get_sta_section(cfg, data)
@@ -763,6 +756,16 @@ def switch_sta_profile(cfg, expect_hotspot):
     target = build_expected_profile(cfg, expect_hotspot)
     if not target["ssid"]:
         return False, "%s SSID \u672A\u914D\u7F6E\u3002" % target["label"]
+
+    existing = _find_sta_by_ssid(target["ssid"], data)
+    if existing and existing != section:
+        ok, msg = _toggle_sta_sections(existing, section)
+        if int(SWITCH_DELAY_SECONDS) > 0:
+            time.sleep(int(SWITCH_DELAY_SECONDS))
+        hint = "\u5DF2\u5207\u6362\u4E3A%s\u914D\u7F6E\uFF08\u590D\u7528\u63A5\u53E3\u8282 %s\uFF09" % (target["label"], existing)
+        if msg:
+            hint = hint + "\uFF1B" + msg
+        return ok, hint
 
     ok, msg = apply_sta_profile(section, target)
     if (not ok) and msg:
@@ -816,8 +819,11 @@ def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
     if wifi_key_required(expected["encryption"]) and not expected["key"]:
         return False, "%s \u914D\u7F6E\u7F3A\u5C11\u5BC6\u7801\u3002" % expected["label"], last_switch_ts
 
-    current = get_sta_profile_from_section(section, data)
-    _, ip_now = wait_for_sta_ipv4(section, timeout_seconds=1, interval_seconds=1)
+    existing = _find_sta_by_ssid(expected["ssid"], data)
+    check = existing if existing else section
+
+    current = get_sta_profile_from_section(check, data)
+    _, ip_now = wait_for_sta_ipv4(check, timeout_seconds=1, interval_seconds=1)
     if profiles_match(current, expected) and ip_now:
         return True, "", last_switch_ts
 
@@ -831,7 +837,8 @@ def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
         detail = sw_msg or "\u5207\u6362\u547D\u4EE4\u6267\u884C\u5931\u8D25"
         return False, "%s\u672A\u5C31\u7EEA\uFF0C\u81EA\u52A8\u5207\u6362\u5931\u8D25: %s" % (expected["label"], detail), switched_at
 
-    _, ip_after = wait_for_sta_ipv4(section, timeout_seconds=SSID_READY_TIMEOUT_SECONDS, interval_seconds=1)
+    active = _find_sta_by_ssid(expected["ssid"]) or check
+    _, ip_after = wait_for_sta_ipv4(active, timeout_seconds=SSID_READY_TIMEOUT_SECONDS, interval_seconds=1)
     if ip_after:
         note = "%s\u672A\u5C31\u7EEA\uFF0C\u5DF2\u81EA\u52A8\u5207\u6362\u5230\u671F\u671B\u914D\u7F6E\u3002" % expected["label"]
         if sw_msg:
@@ -966,9 +973,7 @@ def get_info(username, password, ip, ac_id, enc):
         "acid": ac_id,
         "enc_ver": enc,
     }
-    i_value = re.sub("'", '"', str(info_temp))
-    i_value = re.sub(" ", "", i_value)
-    return i_value
+    return json.dumps(info_temp, separators=(",", ":"))
 
 
 def get_chksum(token, username, hmd5, ac_id, ip, n_value, type_value, i_value):
@@ -997,8 +1002,8 @@ def prepare_campus_for_login(cfg):
         return True, ""
     return False, msg
 
-def init_getip(init_url):
-    text = http_get(init_url, timeout=5)
+def init_getip(init_url, bind_ip=None):
+    text = http_get(init_url, timeout=5, bind_ip=bind_ip)
     ip = extract_ip_from_text(text)
     if not ip:
         target_host = init_url.split("://", 1)[-1].split("/", 1)[0]
@@ -1008,7 +1013,7 @@ def init_getip(init_url):
     return ip
 
 
-def get_token(get_challenge_api, username, ip):
+def get_token(get_challenge_api, username, ip, bind_ip=None):
     now = int(time.time() * 1000)
     params = {
         "callback": "jQuery112404953340710317169_" + str(now),
@@ -1016,7 +1021,7 @@ def get_token(get_challenge_api, username, ip):
         "ip": ip,
         "_": now,
     }
-    data = parse_jsonp(http_get(get_challenge_api, params=params, timeout=5))
+    data = parse_jsonp(http_get(get_challenge_api, params=params, timeout=5, bind_ip=bind_ip))
     token = data.get("challenge")
     if not token:
         msg = data.get("error_msg") or data.get("error") or "unknown response"
@@ -1027,13 +1032,13 @@ def get_token(get_challenge_api, username, ip):
     return token, resolved_ip
 
 
-def query_online_status(rad_user_info_api, expected_username):
+def query_online_status(rad_user_info_api, expected_username, bind_ip=None):
     now = int(time.time() * 1000)
     params = {
         "callback": "jQuery112406118340540763985_" + str(now),
         "_": now,
     }
-    data = parse_jsonp(http_get(rad_user_info_api, params=params, timeout=5))
+    data = parse_jsonp(http_get(rad_user_info_api, params=params, timeout=5, bind_ip=bind_ip))
     if str(data.get("error", "")).lower() != "ok":
         msg = data.get("error_msg") or data.get("error") or "unknown response"
         return False, "离线: " + localize_error(msg)
@@ -1055,7 +1060,7 @@ def do_complex_work(cfg, ip, token):
     return i_value, hmd5, chksum
 
 
-def login(srun_portal_api, cfg, ip, i_value, hmd5, chksum):
+def login(srun_portal_api, cfg, ip, i_value, hmd5, chksum, bind_ip=None):
     now = int(time.time() * 1000)
     params = {
         "callback": "jQuery11240645308969735664_" + str(now),
@@ -1073,7 +1078,7 @@ def login(srun_portal_api, cfg, ip, i_value, hmd5, chksum):
         "double_stack": "0",
         "_": now,
     }
-    data = parse_jsonp(http_get(srun_portal_api, params=params, timeout=5))
+    data = parse_jsonp(http_get(srun_portal_api, params=params, timeout=5, bind_ip=bind_ip))
     error = str(data.get("error", "")).lower()
     result = str(data.get("res", "")).lower()
     success = error == "ok" or result == "ok"
@@ -1081,7 +1086,7 @@ def login(srun_portal_api, cfg, ip, i_value, hmd5, chksum):
     return success, str(message)
 
 
-def logout(srun_portal_api, cfg, ip):
+def logout(srun_portal_api, cfg, ip, bind_ip=None):
     now = int(time.time() * 1000)
     params = {
         "callback": "jQuery11240645308969735664_" + str(now),
@@ -1091,7 +1096,7 @@ def logout(srun_portal_api, cfg, ip):
         "ip": ip,
         "_": now,
     }
-    data = parse_jsonp(http_get(srun_portal_api, params=params, timeout=5))
+    data = parse_jsonp(http_get(srun_portal_api, params=params, timeout=5, bind_ip=bind_ip))
     error = str(data.get("error", "")).lower()
     result = str(data.get("res", "")).lower()
     success = error == "ok" or result == "ok"
@@ -1111,19 +1116,20 @@ def run_once(cfg):
         return False, campus_msg
 
     urls = build_urls(cfg["base_url"])
-    ip = init_getip(urls["init_url"])
-    token, ip = get_token(urls["get_challenge_api"], cfg["username"], ip)
+    bip = resolve_bind_ip(urls["init_url"], cfg)
+    ip = init_getip(urls["init_url"], bind_ip=bip)
+    token, ip = get_token(urls["get_challenge_api"], cfg["username"], ip, bind_ip=bip)
     i_value, hmd5, chksum = do_complex_work(cfg, ip, token)
-    ok, message = login(urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum)
+    ok, message = login(urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum, bind_ip=bip)
 
     if (not ok) and ("challenge_expire_error" in message.lower()):
-        token, ip = get_token(urls["get_challenge_api"], cfg["username"], ip)
+        token, ip = get_token(urls["get_challenge_api"], cfg["username"], ip, bind_ip=bip)
         i_value, hmd5, chksum = do_complex_work(cfg, ip, token)
-        ok, message = login(urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum)
+        ok, message = login(urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum, bind_ip=bip)
 
     if (not ok) and ("no_response_data_error" in message.lower()):
         try:
-            online, online_msg = query_online_status(urls["rad_user_info_api"], cfg["username"])
+            online, online_msg = query_online_status(urls["rad_user_info_api"], cfg["username"], bind_ip=bip)
             if online:
                 return True, "已在线"
             return False, online_msg
@@ -1185,170 +1191,169 @@ def run_switch(cfg, expect_hotspot):
     return False, "切换失败: " + (message or "未知错误")
 
 
+def _make_daemon_state():
+    return {
+        "was_in_quiet": False,
+        "quiet_logout_done": False,
+        "current_mode": "campus",
+        "was_online": False,
+        "last_switch_ts": 0,
+    }
+
+
+def _safe_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except HTTP_EXCEPTIONS as exc:
+        return False, "网络错误: " + localize_error(exc)
+    except ValueError as exc:
+        return False, "响应解析错误: " + localize_error(exc)
+    except Exception as exc:
+        return False, "错误: " + localize_error(exc)
+
+
+def _daemon_tick_quiet(cfg, state, interval):
+    mode_msg = ""
+
+    if failover_enabled(cfg):
+        ssid_ok, ssid_msg, state["last_switch_ts"] = ensure_expected_profile(
+            cfg, expect_hotspot=True, last_switch_ts=state["last_switch_ts"],
+        )
+        if ssid_ok:
+            state["current_mode"] = "hotspot"
+        if ssid_msg:
+            mode_msg = ssid_msg
+        if not ssid_ok:
+            state["was_in_quiet"] = True
+            state["was_online"] = False
+            state["current_mode"] = "hotspot"
+            message = "夜间停用（未连接）"
+            if mode_msg:
+                message = message + "；" + mode_msg
+            return message, min(interval, 60)
+
+    if not state["was_in_quiet"]:
+        state["quiet_logout_done"] = False
+
+    if state["quiet_logout_done"]:
+        conn_state = quiet_connection_state(cfg)
+        message = "夜间停用（%s）" % conn_state
+    else:
+        ok, message = _safe_call(run_quiet_logout, cfg)
+        state["quiet_logout_done"] = ok
+
+    if mode_msg:
+        message = message + "；" + mode_msg
+
+    state["was_in_quiet"] = True
+    state["was_online"] = False
+    return message, min(interval, 60)
+
+
+def _daemon_tick_active(cfg, state, interval):
+    online_interval = min(interval, ONLINE_CHECK_MAX_SECONDS)
+    mode_msg = ""
+
+    if state["was_in_quiet"]:
+        append_log("[JXNU-SRun] 退出夜间时段，准备切回校园网配置")
+        state["quiet_logout_done"] = False
+        state["was_in_quiet"] = False
+        state["was_online"] = False
+        state["last_switch_ts"] = 0
+        if failover_enabled(cfg):
+            switched, sw_msg = switch_to_campus(cfg)
+            state["current_mode"] = "campus" if switched else "hotspot"
+            if sw_msg:
+                mode_msg = sw_msg
+
+    if failover_enabled(cfg):
+        ready_ok, ready_msg, state["last_switch_ts"] = ensure_expected_profile(
+            cfg, expect_hotspot=False, last_switch_ts=state["last_switch_ts"],
+        )
+        if ready_ok:
+            state["current_mode"] = "campus"
+            if ready_msg:
+                mode_msg = (mode_msg + "；" if mode_msg else "") + ready_msg
+        else:
+            state["current_mode"] = "hotspot"
+            state["was_online"] = False
+            message = "校园网配置未就绪"
+            if ready_msg:
+                message = message + "；" + ready_msg
+            return message, min(interval, 30)
+
+    if failover_enabled(cfg) and state["current_mode"] == "hotspot":
+        state["was_online"] = False
+        message = "已切换到热点SSID，校园网SSID恢复后将自动切回"
+        if mode_msg:
+            message = message + "；" + mode_msg
+        return message, interval
+
+    next_sleep = interval
+    try:
+        urls = build_urls(cfg["base_url"])
+        online_now = False
+        status_message = ""
+        if cfg["username"]:
+            online_now, status_message = query_online_status(urls["rad_user_info_api"], cfg["username"])
+
+        if online_now:
+            message = "在线，下一次检测间隔 %d 秒" % online_interval
+            if not state["was_online"]:
+                message = "检测到在线，下一次检测间隔 %d 秒" % online_interval
+            state["was_online"] = True
+            next_sleep = online_interval
+        else:
+            if state["was_online"]:
+                append_log("[JXNU-SRun] 检测到断线，立即开始重连")
+            state["was_online"] = False
+            ok, message = run_once_with_retry(cfg)
+            state["was_online"] = bool(ok)
+            if not ok and status_message:
+                message = "%s；状态检测结果: %s" % (message, status_message)
+    except HTTP_EXCEPTIONS as exc:
+        append_log("[JXNU-SRun] 状态检测网络异常，尝试重连")
+        state["was_online"] = False
+        ok, message = run_once_with_retry(cfg)
+        if not ok:
+            message = "网络异常: %s；重连结果: %s" % (localize_error(exc), message)
+    except ValueError as exc:
+        append_log("[JXNU-SRun] 状态检测解析异常，尝试重连")
+        state["was_online"] = False
+        ok, message = run_once_with_retry(cfg)
+        if not ok:
+            message = "解析异常: %s；重连结果: %s" % (localize_error(exc), message)
+    except Exception as exc:
+        append_log("[JXNU-SRun] 状态检测异常，尝试重连")
+        state["was_online"] = False
+        ok, message = run_once_with_retry(cfg)
+        if not ok:
+            message = "异常: %s；重连结果: %s" % (localize_error(exc), message)
+
+    if mode_msg:
+        message = message + "；" + mode_msg
+    return message, next_sleep
+
+
 def run_daemon():
-    was_in_quiet = False
-    quiet_logout_done = False
-    current_mode = "campus"
-    was_online = False
-    last_expected_ssid_switch_at = 0
+    state = _make_daemon_state()
 
     while True:
         cfg = load_config()
         interval = max(int(cfg["interval"]), 5)
-        online_interval = min(interval, ONLINE_CHECK_MAX_SECONDS)
 
         if cfg["enabled"] != "1":
-            was_in_quiet = False
-            quiet_logout_done = False
-            current_mode = "campus"
-            was_online = False
-            last_expected_ssid_switch_at = 0
+            state.update(_make_daemon_state())
             time.sleep(interval)
             continue
 
-        in_quiet = in_quiet_window(cfg)
-        mode_msg = ""
-
-        if in_quiet:
-            if failover_enabled(cfg):
-                ssid_ok, ssid_msg, last_expected_ssid_switch_at = ensure_expected_profile(
-                    cfg,
-                    expect_hotspot=True,
-                    last_switch_ts=last_expected_ssid_switch_at,
-                )
-                if ssid_ok:
-                    current_mode = "hotspot"
-                if ssid_msg:
-                    mode_msg = (mode_msg + "；" if mode_msg else "") + ssid_msg
-                if not ssid_ok:
-                    message = "夜间停用（未连接）"
-                    if mode_msg:
-                        message = message + "；" + mode_msg
-                    append_log(("[JXNU-SRun] " + message).strip())
-                    was_in_quiet = True
-                    was_online = False
-                    current_mode = "hotspot"
-                    time.sleep(min(interval, 60))
-                    continue
-
-            try:
-                if not was_in_quiet:
-                    quiet_logout_done = False
-
-                if quiet_logout_done:
-                    state = quiet_connection_state(cfg)
-                    message = "夜间停用（%s）" % state
-                    ok = True
-                else:
-                    ok, message = run_quiet_logout(cfg)
-                    quiet_logout_done = ok
-            except HTTP_EXCEPTIONS as exc:
-                ok, message = False, "网络错误: " + localize_error(exc)
-            except ValueError as exc:
-                ok, message = False, "响应解析错误: " + localize_error(exc)
-            except Exception as exc:
-                ok, message = False, "错误: " + localize_error(exc)
-
-            if mode_msg:
-                message = message + "；" + mode_msg
-
-            append_log(("[JXNU-SRun] " + message).strip())
-            was_in_quiet = True
-            was_online = False
-            time.sleep(min(interval, 60))
-            continue
-
-        if was_in_quiet:
-            append_log("[JXNU-SRun] 退出夜间时段，准备切回校园网配置")
-            quiet_logout_done = False
-            was_in_quiet = False
-            was_online = False
-            last_expected_ssid_switch_at = 0
-            if failover_enabled(cfg):
-                switched, sw_msg = switch_to_campus(cfg)
-                current_mode = "campus" if switched else "hotspot"
-                if sw_msg:
-                    mode_msg = sw_msg
-
-        if failover_enabled(cfg):
-            ready_ok, ready_msg, last_expected_ssid_switch_at = ensure_expected_profile(
-                cfg,
-                expect_hotspot=False,
-                last_switch_ts=last_expected_ssid_switch_at,
-            )
-            if ready_ok:
-                current_mode = "campus"
-                if ready_msg:
-                    mode_msg = (mode_msg + "；" if mode_msg else "") + ready_msg
-            else:
-                current_mode = "hotspot"
-                message = "校园网配置未就绪"
-                if ready_msg:
-                    message = message + "；" + ready_msg
-                append_log("[JXNU-SRun] " + message)
-                was_online = False
-                time.sleep(min(interval, 30))
-                continue
-
-        if failover_enabled(cfg) and current_mode == "hotspot":
-            was_online = False
-            message = "已切换到热点SSID，校园网SSID恢复后将自动切回"
-            if mode_msg:
-                message = message + "；" + mode_msg
-            append_log(("[JXNU-SRun] " + message).strip())
-            time.sleep(interval)
-            continue
-
-        next_sleep = interval
-
-        try:
-            urls = build_urls(cfg["base_url"])
-            online_now = False
-            status_message = ""
-            if cfg["username"]:
-                online_now, status_message = query_online_status(urls["rad_user_info_api"], cfg["username"])
-
-            if online_now:
-                ok = True
-                message = "在线，下一次检测间隔 %d 秒" % online_interval
-                if not was_online:
-                    message = "检测到在线，下一次检测间隔 %d 秒" % online_interval
-                was_online = True
-                next_sleep = online_interval
-            else:
-                if was_online:
-                    append_log("[JXNU-SRun] 检测到断线，立即开始重连")
-                was_online = False
-
-                ok, message = run_once_with_retry(cfg)
-                was_online = bool(ok)
-                if not ok and status_message:
-                    message = "%s；状态检测结果: %s" % (message, status_message)
-
-        except HTTP_EXCEPTIONS as exc:
-            append_log("[JXNU-SRun] 状态检测网络异常，尝试重连")
-            was_online = False
-            ok, message = run_once_with_retry(cfg)
-            if not ok:
-                message = "网络异常: %s；重连结果: %s" % (localize_error(exc), message)
-        except ValueError as exc:
-            append_log("[JXNU-SRun] 状态检测解析异常，尝试重连")
-            was_online = False
-            ok, message = run_once_with_retry(cfg)
-            if not ok:
-                message = "解析异常: %s；重连结果: %s" % (localize_error(exc), message)
-        except Exception as exc:
-            append_log("[JXNU-SRun] 状态检测异常，尝试重连")
-            was_online = False
-            ok, message = run_once_with_retry(cfg)
-            if not ok:
-                message = "异常: %s；重连结果: %s" % (localize_error(exc), message)
-
-        if mode_msg:
-            message = message + "；" + mode_msg
+        if in_quiet_window(cfg):
+            message, sleep = _daemon_tick_quiet(cfg, state, interval)
+        else:
+            message, sleep = _daemon_tick_active(cfg, state, interval)
 
         append_log(("[JXNU-SRun] " + message).strip())
-        time.sleep(next_sleep)
+        time.sleep(sleep)
 
 def main():
     parser = argparse.ArgumentParser(description="JXNU SRun client for OpenWrt")
