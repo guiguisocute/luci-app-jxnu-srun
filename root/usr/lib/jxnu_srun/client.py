@@ -594,7 +594,7 @@ def parse_wireless_iface_data():
         if not m:
             continue
         sec, opt, val = m.groups()
-        if opt not in ("ssid", "mode", "network", "disabled", "encryption", "key"):
+        if opt not in ("ssid", "mode", "network", "disabled", "encryption", "key", "device", "jxnu_auto"):
             continue
         data.setdefault(sec, {})[opt] = parse_uci_value(val)
     return data
@@ -654,6 +654,94 @@ def get_sta_profile_from_section(section, wireless_data=None):
     }
 
 
+def parse_radio_bands():
+    ok, out = run_cmd(["uci", "show", "wireless"])
+    if not ok or not out:
+        return {}
+    bands = {}
+    for line in out.splitlines():
+        m = re.match(r"^wireless\.(radio\d+)\.(band|hwmode)=(.+)$", line.strip())
+        if not m:
+            continue
+        radio, opt, val = m.groups()
+        val = parse_uci_value(val).lower()
+        if opt == "band":
+            bands[radio] = val
+        elif opt == "hwmode" and radio not in bands:
+            if "a" in val:
+                bands[radio] = "5g"
+            else:
+                bands[radio] = "2g"
+    return bands
+
+
+def band_label(band):
+    labels = {"2g": "2.4GHz", "5g": "5GHz", "6g": "6GHz"}
+    return labels.get(str(band or "").lower(), str(band or "?"))
+
+
+def get_radio_for_section(section, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    return str(data.get(str(section or ""), {}).get("device", "")).strip() or None
+
+
+def find_sta_on_radio(radio, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    target = str(radio or "").strip()
+    for sec in sorted(data.keys()):
+        opts = data[sec]
+        if (str(opts.get("mode", "")).strip().lower() == "sta"
+                and str(opts.get("device", "")).strip() == target):
+            return sec
+    return None
+
+
+def create_sta_on_radio(radio, network_name, profile):
+    ok, out = run_cmd(["uci", "add", "wireless", "wifi-iface"])
+    if not ok or not out:
+        return None, "uci add wifi-iface 失败"
+    section = out.strip()
+
+    ssid = str(profile.get("ssid", "")).strip()
+    encryption = normalize_wifi_encryption(profile.get("encryption", "none"))
+    key = str(profile.get("key", "")).strip()
+
+    cmds = [
+        ["uci", "set", "wireless.%s.device=%s" % (section, radio)],
+        ["uci", "set", "wireless.%s.mode=sta" % section],
+        ["uci", "set", "wireless.%s.network=%s" % (section, network_name)],
+        ["uci", "set", "wireless.%s.ssid=%s" % (section, ssid)],
+        ["uci", "set", "wireless.%s.encryption=%s" % (section, encryption)],
+        ["uci", "set", "wireless.%s.jxnu_auto=1" % section],
+        ["uci", "set", "wireless.%s.disabled=0" % section],
+    ]
+    if wifi_key_required(encryption) and key:
+        cmds.append(["uci", "set", "wireless.%s.key=%s" % (section, key)])
+
+    msgs = []
+    for cmd in cmds:
+        c_ok, c_msg = run_cmd(cmd)
+        if not c_ok and c_msg:
+            msgs.append(c_msg)
+
+    if msgs:
+        return section, "；".join(msgs)
+    return section, ""
+
+
+def _disable_jxnu_auto_sta_sections(wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    disabled = []
+    for sec in sorted(data.keys()):
+        opts = data[sec]
+        if (str(opts.get("mode", "")).strip().lower() == "sta"
+                and str(opts.get("jxnu_auto", "")).strip() == "1"
+                and str(opts.get("disabled", "")).strip() != "1"):
+            run_cmd(["uci", "set", "wireless.%s.disabled=1" % sec])
+            disabled.append(sec)
+    return disabled
+
+
 def commit_reload_wireless():
     ok1, msg1 = run_cmd(["uci", "commit", "wireless"])
     ok2, msg2 = run_cmd(["wifi", "reload"])
@@ -662,19 +750,19 @@ def commit_reload_wireless():
     return False, "\uFF1B".join([x for x in [msg1, msg2] if x])
 
 
-def apply_sta_profile(section, profile):
+def _set_sta_profile_uci(section, profile):
     sec = str(section or "").strip()
     if not sec:
-        return False, "\u672A\u914D\u7F6E STA \u63A5\u53E3\u8282\u3002"
+        return False, "未配置 STA 接口节。"
 
     ssid = str(profile.get("ssid", "")).strip()
     encryption = normalize_wifi_encryption(profile.get("encryption", "none"))
     key = str(profile.get("key", "")).strip()
 
     if not ssid:
-        return False, "\u76EE\u6807 SSID \u4E3A\u7A7A\u3002"
+        return False, "目标 SSID 为空。"
     if wifi_key_required(encryption) and not key:
-        return False, "\u76EE\u6807 SSID \u9700\u8981\u5BC6\u7801\uFF0C\u4F46\u672A\u914D\u7F6E key\u3002"
+        return False, "目标 SSID 需要密码，但未配置 key。"
 
     msgs = []
     ok = True
@@ -697,12 +785,18 @@ def apply_sta_profile(section, profile):
     else:
         run_cmd(["uci", "-q", "delete", "wireless.%s.key" % sec])
 
-    ok2, msg2 = commit_reload_wireless()
-    ok = ok and ok2
-    if msg2:
-        msgs.append(msg2)
+    return ok, "；".join([x for x in msgs if x])
 
-    return ok, "\uFF1B".join([x for x in msgs if x])
+
+def apply_sta_profile(section, profile):
+    ok, msg = _set_sta_profile_uci(section, profile)
+    if not ok:
+        return ok, msg
+    ok2, msg2 = commit_reload_wireless()
+    if not ok2:
+        parts = [x for x in [msg, msg2] if x]
+        return False, "；".join(parts)
+    return True, msg
 
 
 def build_expected_profile(cfg, expect_hotspot):
@@ -750,36 +844,142 @@ def _toggle_sta_sections(enable_sec, disable_sec):
     return commit_reload_wireless()
 
 
+def _cross_radio_fallback(cfg, original_section, target, wireless_data):
+    bands = parse_radio_bands()
+    current_radio = get_radio_for_section(original_section, wireless_data)
+    current_bl = band_label(bands.get(current_radio, ""))
+    other_radios = sorted([r for r in bands if r != current_radio])
+
+    if not other_radios:
+        return False, "%s (%s) 无法连接热点 %s, 无其他可用频段" % (
+            current_radio or "?", current_bl, target["ssid"])
+
+    append_log("[JXNU-SRun] %s (%s) 无法连接热点 %s, 尝试其他频段" % (
+        current_radio or "?", current_bl, target["ssid"]))
+
+    campus = build_expected_profile(cfg, expect_hotspot=False)
+    _set_sta_profile_uci(original_section, campus)
+    run_cmd(["uci", "set", "wireless.%s.disabled=1" % original_section])
+
+    network_name = get_network_interface_from_sta_section(
+        original_section, wireless_data) or "wwan"
+
+    tried = []
+    for radio in other_radios:
+        bl = band_label(bands.get(radio, ""))
+        append_log("[JXNU-SRun] 尝试 %s (%s)" % (radio, bl))
+        tried.append("%s (%s)" % (radio, bl))
+
+        alt_sta = find_sta_on_radio(radio, wireless_data)
+        is_auto = (alt_sta
+                   and str(wireless_data.get(alt_sta, {}).get(
+                       "jxnu_auto", "")).strip() == "1")
+
+        if alt_sta and is_auto:
+            _set_sta_profile_uci(alt_sta, target)
+            run_cmd(["uci", "set", "wireless.%s.disabled=0" % alt_sta])
+        else:
+            alt_sta, create_msg = create_sta_on_radio(
+                radio, network_name, target)
+            if not alt_sta:
+                append_log("[JXNU-SRun] 无法在 %s 上创建 STA: %s" % (
+                    radio, create_msg))
+                continue
+
+        commit_reload_wireless()
+
+        if int(SWITCH_DELAY_SECONDS) > 0:
+            time.sleep(int(SWITCH_DELAY_SECONDS))
+
+        _, ip = wait_for_sta_ipv4(
+            alt_sta, timeout_seconds=SSID_READY_TIMEOUT_SECONDS)
+        if ip:
+            dns_ok, _ = test_internet_connectivity()
+            conn_hint = "连通" if dns_ok else "不通"
+            append_log("[JXNU-SRun] 已通过 %s (%s) 连接热点 %s (%s)" % (
+                radio, bl, target["ssid"], conn_hint))
+            return True, "已切换为%s配置（跨频段 %s %s, %s）" % (
+                target["label"], radio, bl, conn_hint)
+
+        append_log("[JXNU-SRun] %s (%s) 也无法连接热点" % (radio, bl))
+        run_cmd(["uci", "set", "wireless.%s.disabled=1" % alt_sta])
+
+    run_cmd(["uci", "set", "wireless.%s.disabled=0" % original_section])
+    commit_reload_wireless()
+
+    return False, "所有频段均无法连接热点 %s (已尝试: %s %s, %s)" % (
+        target["ssid"], current_radio or "?", current_bl, ", ".join(tried))
+
+
 def switch_sta_profile(cfg, expect_hotspot):
     data = parse_wireless_iface_data()
     section = get_sta_section(cfg, data)
     if not section:
-        return False, "\u672A\u627E\u5230\u53EF\u7528\u7684 STA \u63A5\u53E3\u8282\u3002"
+        return False, "未找到可用的 STA 接口节。"
 
     target = build_expected_profile(cfg, expect_hotspot)
     if not target["ssid"]:
-        return False, "%s SSID \u672A\u914D\u7F6E\u3002" % target["label"]
+        return False, "%s SSID 未配置。" % target["label"]
+
+    if not expect_hotspot:
+        _disable_jxnu_auto_sta_sections(data)
 
     existing = _find_sta_by_ssid(target["ssid"], data)
     if existing and existing != section:
         ok, msg = _toggle_sta_sections(existing, section)
         if int(SWITCH_DELAY_SECONDS) > 0:
             time.sleep(int(SWITCH_DELAY_SECONDS))
-        hint = "\u5DF2\u5207\u6362\u4E3A%s\u914D\u7F6E\uFF08\u590D\u7528\u63A5\u53E3\u8282 %s\uFF09" % (target["label"], existing)
+        radio = get_radio_for_section(existing, data)
+        bands = parse_radio_bands()
+        bl = band_label(bands.get(radio, ""))
+        hint = "已切换为%s配置（复用接口节 %s, %s %s）" % (
+            target["label"], existing, radio or "?", bl)
         if msg:
-            hint = hint + "\uFF1B" + msg
+            hint = hint + "；" + msg
         return ok, hint
 
     ok, msg = apply_sta_profile(section, target)
     if (not ok) and msg:
         return False, msg
     if not ok:
-        return False, "\u5199\u5165\u65E0\u7EBF\u914D\u7F6E\u5931\u8D25\u3002"
+        return False, "写入无线配置失败。"
 
     if int(SWITCH_DELAY_SECONDS) > 0:
         time.sleep(int(SWITCH_DELAY_SECONDS))
 
-    return True, "\u5DF2\u5207\u6362\u4E3A%s\u914D\u7F6E\uFF08\u63A5\u53E3\u8282 %s\uFF09" % (target["label"], section)
+    radio = get_radio_for_section(section, data)
+    bands = parse_radio_bands()
+    bl = band_label(bands.get(radio, ""))
+
+    if not expect_hotspot:
+        _, ip = wait_for_sta_ipv4(
+            section, timeout_seconds=SSID_READY_TIMEOUT_SECONDS)
+        if ip:
+            portal_ok, portal_detail = _test_portal_reachability(cfg)
+            if portal_ok:
+                conn_hint = "网关可达"
+            else:
+                conn_hint = "网关不可达"
+                if portal_detail:
+                    conn_hint = conn_hint + ": " + portal_detail
+            append_log("[JXNU-SRun] 校园网切换完成 (%s %s, %s)" % (
+                radio or "?", bl, conn_hint))
+            return True, "已切换为%s配置（%s %s, %s）" % (
+                target["label"], radio or "?", bl, conn_hint)
+        append_log("[JXNU-SRun] 校园网切换后未获取到 IPv4 (%s %s)" % (
+            radio or "?", bl))
+        return False, "已切换为%s配置但未获取到IPv4地址（%s %s）" % (
+            target["label"], radio or "?", bl)
+
+    _, ip = wait_for_sta_ipv4(
+        section, timeout_seconds=SSID_READY_TIMEOUT_SECONDS)
+    if ip:
+        dns_ok, _ = test_internet_connectivity()
+        conn_hint = "连通" if dns_ok else "不通"
+        return True, "已切换为%s配置（%s %s, %s）" % (
+            target["label"], radio or "?", bl, conn_hint)
+
+    return _cross_radio_fallback(cfg, section, target, data)
 
 
 def switch_to_hotspot(cfg):
@@ -807,6 +1007,38 @@ def wait_for_sta_ipv4(section, timeout_seconds=SSID_READY_TIMEOUT_SECONDS, inter
     return last_net, None
 
 
+CONNECTIVITY_CHECK_URLS = [
+    "http://connect.rom.miui.com/generate_204",
+    "http://wifi.vivo.com.cn/generate_204",
+]
+
+
+def test_internet_connectivity(timeout=5):
+    for url in CONNECTIVITY_CHECK_URLS:
+        try:
+            body = http_get(url, timeout=timeout)
+            if len(str(body or "")) < 64:
+                return True, ""
+            return False, "疑似被重定向到认证页面"
+        except Exception:
+            continue
+    return False, "无法访问连通性检测服务器"
+
+
+def _test_portal_reachability(cfg, timeout=3):
+    base_url = str(cfg.get("base_url", "")).strip()
+    if not base_url:
+        return False, "认证网关地址未配置"
+    try:
+        http_get(base_url, timeout=timeout)
+        return True, ""
+    except Exception as exc:
+        detail = str(exc)
+        if len(detail) > 120:
+            detail = detail[:120] + "..."
+        return False, detail
+
+
 def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
     if not failover_enabled(cfg):
         return True, "", last_switch_ts
@@ -814,13 +1046,13 @@ def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
     data = parse_wireless_iface_data()
     section = get_sta_section(cfg, data)
     if not section:
-        return False, "\u672A\u627E\u5230\u53EF\u7528\u7684 STA \u63A5\u53E3\u8282\u3002", last_switch_ts
+        return False, "未找到可用的 STA 接口节。", last_switch_ts
 
     expected = build_expected_profile(cfg, expect_hotspot)
     if not expected["ssid"]:
-        return False, "%s SSID \u672A\u914D\u7F6E\u3002" % expected["label"], last_switch_ts
+        return False, "%s SSID 未配置。" % expected["label"], last_switch_ts
     if wifi_key_required(expected["encryption"]) and not expected["key"]:
-        return False, "%s \u914D\u7F6E\u7F3A\u5C11\u5BC6\u7801\u3002" % expected["label"], last_switch_ts
+        return False, "%s 配置缺少密码。" % expected["label"], last_switch_ts
 
     existing = _find_sta_by_ssid(expected["ssid"], data)
     check = existing if existing else section
@@ -832,24 +1064,19 @@ def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
 
     now = time.time()
     if last_switch_ts and (now - last_switch_ts) < SSID_EXPECTED_RETRY_SECONDS:
-        return False, "%s\u672A\u5C31\u7EEA\uFF0C\u7B49\u5F85\u540E\u91CD\u8BD5\u5207\u6362\u3002" % expected["label"], last_switch_ts
+        return False, "%s未就绪，等待后重试切换。" % expected["label"], last_switch_ts
 
     switched, sw_msg = switch_sta_profile(cfg, expect_hotspot)
     switched_at = now
+
     if not switched:
-        detail = sw_msg or "\u5207\u6362\u547D\u4EE4\u6267\u884C\u5931\u8D25"
-        return False, "%s\u672A\u5C31\u7EEA\uFF0C\u81EA\u52A8\u5207\u6362\u5931\u8D25: %s" % (expected["label"], detail), switched_at
+        detail = sw_msg or "切换命令执行失败"
+        return False, "%s未就绪，自动切换失败: %s" % (expected["label"], detail), switched_at
 
-    active = _find_sta_by_ssid(expected["ssid"]) or check
-    _, ip_after = wait_for_sta_ipv4(active, timeout_seconds=SSID_READY_TIMEOUT_SECONDS, interval_seconds=1)
-    if ip_after:
-        note = "%s\u672A\u5C31\u7EEA\uFF0C\u5DF2\u81EA\u52A8\u5207\u6362\u5230\u671F\u671B\u914D\u7F6E\u3002" % expected["label"]
-        if sw_msg:
-            note = note + " " + sw_msg
-        return True, note, switched_at
-
-    detail = sw_msg or "\u5207\u6362\u540E\u4ECD\u672A\u83B7\u53D6IPv4\u5730\u5740"
-    return False, "%s\u672A\u5C31\u7EEA\uFF0C\u81EA\u52A8\u5207\u6362\u540E\u4ECD\u4E0D\u53EF\u7528: %s" % (expected["label"], detail), switched_at
+    note = "%s未就绪，已自动切换到期望配置。" % expected["label"]
+    if sw_msg:
+        note = note + " " + sw_msg
+    return True, note, switched_at
 
 
 def get_md5(password, token):
