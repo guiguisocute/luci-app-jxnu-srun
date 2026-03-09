@@ -33,7 +33,10 @@ HEADER = {
 BEIJING_TZ = timezone(timedelta(hours=8))
 LOG_FILE = "/var/log/jxnu_srun.log"
 JSON_CONFIG_FILE = "/usr/lib/jxnu_srun/config.json"
+STATE_FILE = "/var/run/jxnu_srun/state.json"
+ACTION_FILE = "/var/run/jxnu_srun/action.json"
 LOG_MAX_BYTES = 512 * 1024
+CONNECTIVITY_CACHE_SECONDS = 15
 SWITCH_DELAY_SECONDS = 2
 SSID_READY_TIMEOUT_SECONDS = 12
 SSID_EXPECTED_RETRY_SECONDS = 30
@@ -134,6 +137,135 @@ def save_json_raw_config(raw_cfg):
     with open(JSON_CONFIG_FILE, "w", encoding="utf-8") as wf:
         json.dump(payload, wf, ensure_ascii=False, indent=2, sort_keys=True)
         wf.write("\n")
+
+
+def load_json_file(path, allowed_keys=None):
+    try:
+        with open(path, "r", encoding="utf-8") as rf:
+            data = json.load(rf)
+        if isinstance(data, dict):
+            if allowed_keys is None:
+                return data
+            return {k: data[k] for k in data if k in allowed_keys}
+    except Exception:
+        pass
+    return {}
+
+
+def save_json_file(path, payload):
+    ensure_parent_dir(path)
+    tmp_path = str(path) + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as wf:
+        json.dump(payload, wf, ensure_ascii=False, indent=2, sort_keys=True)
+        wf.write("\n")
+    os.replace(tmp_path, path)
+
+
+def load_runtime_state():
+    data = load_json_file(STATE_FILE)
+    return data if isinstance(data, dict) else {}
+
+
+def save_runtime_state(state):
+    payload = dict(state or {})
+    payload["updated_at"] = int(time.time())
+    save_json_file(STATE_FILE, payload)
+
+
+def save_runtime_status(message, state=None, **extra):
+    payload = load_runtime_state()
+    if state:
+        payload.update(state)
+    payload.update(extra)
+    payload["message"] = str(message or "")
+    save_runtime_state(payload)
+
+
+def build_runtime_snapshot(cfg, state=None):
+    data = parse_wireless_iface_data()
+    section = get_active_sta_section(cfg, data)
+    profile = get_sta_profile_from_section(section, data) if section else {}
+    ssid = str(profile.get("ssid", "")).strip()
+    net = get_network_interface_from_sta_section(section, data) if section else None
+    ip = get_ipv4_from_network_interface(net) if net else None
+    previous = load_runtime_state()
+    if ssid == str(cfg.get("hotspot_ssid", "")).strip() and ssid:
+        mode = "hotspot"
+    elif ssid == str(cfg.get("campus_ssid", "")).strip() and ssid:
+        mode = "campus"
+    else:
+        mode = "unknown"
+
+    connectivity = "未连接"
+    connectivity_level = "offline"
+    if ip:
+        now_ts = int(time.time())
+        cache_ip = str(previous.get("current_ip", "")).strip()
+        cache_level = str(previous.get("connectivity_level", "")).strip()
+        cache_text = str(previous.get("connectivity", "")).strip()
+        cache_ts = int(previous.get("connectivity_checked_at", 0) or 0)
+        cache_valid = (
+            cache_ip == ip
+            and cache_level
+            and cache_text
+            and (now_ts - cache_ts) <= CONNECTIVITY_CACHE_SECONDS
+        )
+        if cache_valid:
+            connectivity = cache_text
+            connectivity_level = cache_level
+        else:
+            internet_ok, internet_msg = test_internet_connectivity(timeout=2)
+            if internet_ok:
+                connectivity = "互联网可达"
+                connectivity_level = "online"
+            else:
+                portal_ok, portal_msg = _test_portal_reachability(cfg, timeout=2)
+                if portal_ok:
+                    connectivity = "认证网关可达"
+                    connectivity_level = "portal"
+                else:
+                    detail = internet_msg or portal_msg or "连通性未知"
+                    connectivity = "已连接但受限: %s" % detail
+                    connectivity_level = "limited"
+            previous["connectivity_checked_at"] = now_ts
+    else:
+        previous["connectivity_checked_at"] = int(time.time())
+
+    if mode == "campus":
+        mode_label = "校园网模式"
+    elif mode == "hotspot":
+        mode_label = "热点模式"
+    else:
+        mode_label = "未知模式"
+
+    return {
+        "current_mode": mode,
+        "mode": mode,
+        "mode_label": mode_label,
+        "current_ssid": ssid,
+        "current_iface": str(net or ""),
+        "current_ip": str(ip or ""),
+        "connectivity": connectivity,
+        "connectivity_level": connectivity_level,
+        "connectivity_checked_at": int(previous.get("connectivity_checked_at", 0) or 0),
+    }
+
+
+def queue_runtime_action(action):
+    payload = {
+        "action": str(action or "").strip(),
+        "requested_at": int(time.time()),
+    }
+    save_json_file(ACTION_FILE, payload)
+
+
+def pop_runtime_action():
+    payload = load_json_file(ACTION_FILE)
+    try:
+        os.remove(ACTION_FILE)
+    except OSError:
+        pass
+    return payload if isinstance(payload, dict) else {}
 
 
 def parse_non_negative_int(value, default_value):
@@ -359,6 +491,10 @@ def run_once_with_retry(cfg):
 
 
 def quiet_connection_state(cfg, urls=None):
+    runtime_mode = detect_runtime_mode(cfg)
+    if runtime_mode == "hotspot":
+        return "热点已连接"
+
     if not cfg.get("username"):
         return "未连接"
 
@@ -691,6 +827,45 @@ def get_sta_section(cfg=None, wireless_data=None):
     return sections[0] if sections else None
 
 
+def get_enabled_sta_sections(wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    sections = []
+    for sec in get_sta_sections(data):
+        if str(data.get(sec, {}).get("disabled", "0")).strip() != "1":
+            sections.append(sec)
+    return sections
+
+
+def get_active_sta_section(cfg=None, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    enabled = get_enabled_sta_sections(data)
+    for sec in enabled:
+        net = get_network_interface_from_sta_section(sec, data)
+        ip = get_ipv4_from_network_interface(net) if net else None
+        if ip:
+            return sec
+    if enabled:
+        preferred = str((cfg or {}).get("sta_iface", "")).strip()
+        if preferred and preferred in enabled:
+            return preferred
+        return enabled[0]
+    return get_sta_section(cfg, data)
+
+
+def detect_runtime_mode(cfg, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    section = get_active_sta_section(cfg, data)
+    if not section:
+        return "unknown"
+    profile = get_sta_profile_from_section(section, data)
+    ssid = str(profile.get("ssid", "")).strip()
+    if ssid and ssid == str(cfg.get("hotspot_ssid", "")).strip():
+        return "hotspot"
+    if ssid and ssid == str(cfg.get("campus_ssid", "")).strip():
+        return "campus"
+    return "unknown"
+
+
 def get_network_interface_from_sta_section(section, wireless_data=None):
     sec = str(section or "").strip()
     if not sec:
@@ -772,6 +947,26 @@ def find_managed_sta_on_radio(cfg, radio, wireless_data=None):
     return None
 
 
+def is_anonymous_section_name(section):
+    sec = str(section or "").strip()
+    return bool(re.match(r"^cfg[0-9a-fA-F]+$", sec))
+
+
+def make_managed_sta_section_name(radio, index=0):
+    base = "jxnu_sta_%s" % re.sub(r"[^a-zA-Z0-9_]+", "_", str(radio or "sta"))
+    if index <= 0:
+        return base
+    return "%s_%d" % (base, index)
+
+
+def rename_wireless_section(old_section, new_section):
+    old_sec = str(old_section or "").strip()
+    new_sec = str(new_section or "").strip()
+    if not old_sec or not new_sec or old_sec == new_sec:
+        return True, ""
+    return run_cmd(["uci", "rename", "wireless.%s=%s" % (old_sec, new_sec)])
+
+
 def get_managed_sta_sections(cfg, wireless_data=None):
     data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
     managed = []
@@ -795,11 +990,55 @@ def get_managed_sta_sections(cfg, wireless_data=None):
     return managed
 
 
+def ensure_named_managed_sta_sections(cfg, wireless_data=None):
+    data = wireless_data if wireless_data is not None else parse_wireless_iface_data()
+    managed = get_managed_sta_sections(cfg, data)
+    renamed = []
+
+    for sec in managed:
+        if not is_anonymous_section_name(sec):
+            continue
+
+        radio = get_radio_for_section(sec, data) or "sta"
+        target = make_managed_sta_section_name(radio)
+        suffix = 0
+        while target in data and target != sec:
+            suffix += 1
+            target = make_managed_sta_section_name(radio, suffix)
+
+        ok, msg = rename_wireless_section(sec, target)
+        if not ok:
+            return False, msg or ("重命名无线接口节 %s 失败" % sec)
+
+        data[target] = data.pop(sec)
+        renamed.append((sec, target))
+
+    return True, renamed
+
+
 def create_sta_on_radio(radio, network_name, profile):
     ok, out = run_cmd(["uci", "add", "wireless", "wifi-iface"])
     if not ok or not out:
         return None, "uci add wifi-iface 失败"
     section = out.strip()
+
+    if is_anonymous_section_name(section):
+        target = make_managed_sta_section_name(radio)
+        ok, existing = run_cmd(["uci", "show", "wireless.%s" % target])
+        if ok and existing:
+            suffix = 1
+            while True:
+                candidate = make_managed_sta_section_name(radio, suffix)
+                c_ok, c_existing = run_cmd(["uci", "show", "wireless.%s" % candidate])
+                if not c_ok or not c_existing:
+                    target = candidate
+                    break
+                suffix += 1
+        ok, msg = rename_wireless_section(section, target)
+        if ok:
+            section = target
+        else:
+            return None, msg or ("重命名无线接口节 %s 失败" % section)
 
     ssid = str(profile.get("ssid", "")).strip()
     encryption = normalize_wifi_encryption(profile.get("encryption", "none"))
@@ -1000,6 +1239,12 @@ def select_sta_section(cfg, expect_hotspot, base_section, target, wireless_data)
 
 def switch_sta_profile(cfg, expect_hotspot):
     data = parse_wireless_iface_data()
+    named_ok, named_result = ensure_named_managed_sta_sections(cfg, data)
+    if not named_ok:
+        return False, named_result or "整理无线接口节名称失败。"
+    if named_result:
+        data = parse_wireless_iface_data()
+
     base_section = get_sta_section(cfg, data)
     if not base_section:
         return False, "未找到可用的 STA 接口节。"
@@ -1163,8 +1408,15 @@ def ensure_expected_profile(cfg, expect_hotspot, last_switch_ts=0):
     check = existing if existing else section
 
     current = get_sta_profile_from_section(check, data)
+    active_section = get_active_sta_section(cfg, data)
+    check_enabled = str(data.get(check, {}).get("disabled", "0")).strip() != "1"
     _, ip_now = wait_for_sta_ipv4(check, timeout_seconds=1, interval_seconds=1)
-    if profiles_match(current, expected) and ip_now:
+    if (
+        profiles_match(current, expected)
+        and ip_now
+        and check_enabled
+        and active_section == check
+    ):
         return True, "", last_switch_ts
 
     now = time.time()
@@ -1576,6 +1828,47 @@ def run_switch(cfg, expect_hotspot):
     return False, "切换失败: " + (message or "未知错误")
 
 
+def handle_runtime_action(cfg, state):
+    payload = pop_runtime_action()
+    action = str(payload.get("action", "")).strip()
+    if not action:
+        return False, ""
+
+    action_map = {
+        "switch_hotspot": True,
+        "switch_campus": False,
+    }
+    if action not in action_map:
+        message = "忽略未知动作: %s" % action
+        append_log("[JXNU-SRun] %s" % message)
+        save_runtime_status(
+            message,
+            state,
+            last_action=action,
+            action_result="ignored",
+            **build_runtime_snapshot(cfg, state),
+        )
+        return True, message
+
+    ok, message = run_switch(cfg, expect_hotspot=action_map[action])
+    action_result = "ok" if ok else "error"
+    target_mode = "hotspot" if action_map[action] else "campus"
+    if ok:
+        state["current_mode"] = target_mode
+        if not action_map[action]:
+            state["last_switch_ts"] = 0
+    append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+    save_runtime_status(
+        message,
+        state,
+        last_action=action,
+        action_result=action_result,
+        pending_action="",
+        **build_runtime_snapshot(cfg, state),
+    )
+    return True, message
+
+
 def _make_daemon_state():
     return {
         "was_in_quiet": False,
@@ -1599,6 +1892,21 @@ def _safe_call(fn, *args, **kwargs):
 
 def _daemon_tick_quiet(cfg, state, interval):
     mode_msg = ""
+    runtime_mode = detect_runtime_mode(cfg)
+
+    if not state["was_in_quiet"]:
+        state["quiet_logout_done"] = False
+
+    if state["quiet_logout_done"]:
+        conn_state = quiet_connection_state(cfg)
+        message = "夜间停用（%s）" % conn_state
+    else:
+        if runtime_mode == "hotspot":
+            state["quiet_logout_done"] = True
+            message = "夜间停用（热点已连接）"
+        else:
+            ok, message = _safe_call(run_quiet_logout, cfg)
+            state["quiet_logout_done"] = ok
 
     if failover_enabled(cfg):
         ssid_ok, ssid_msg, state["last_switch_ts"] = ensure_expected_profile(
@@ -1614,20 +1922,12 @@ def _daemon_tick_quiet(cfg, state, interval):
             state["was_in_quiet"] = True
             state["was_online"] = False
             state["current_mode"] = "hotspot"
-            message = "夜间停用（未连接）"
+            wait_message = "夜间停用（未连接）"
+            if message:
+                wait_message = wait_message + "；" + message
             if mode_msg:
-                message = message + "；" + mode_msg
-            return message, min(interval, 60)
-
-    if not state["was_in_quiet"]:
-        state["quiet_logout_done"] = False
-
-    if state["quiet_logout_done"]:
-        conn_state = quiet_connection_state(cfg)
-        message = "夜间停用（%s）" % conn_state
-    else:
-        ok, message = _safe_call(run_quiet_logout, cfg)
-        state["quiet_logout_done"] = ok
+                wait_message = wait_message + "；" + mode_msg
+            return wait_message, min(interval, 60)
 
     if mode_msg:
         message = message + "；" + mode_msg
@@ -1728,6 +2028,14 @@ def _daemon_tick_active(cfg, state, interval):
 
 def run_daemon():
     state = _make_daemon_state()
+    save_runtime_status(
+        "守护进程已启动",
+        state,
+        daemon_running=True,
+        enabled=True,
+        pending_action="",
+        **build_runtime_snapshot(load_config(), state),
+    )
 
     while True:
         cfg = load_config()
@@ -1735,7 +2043,27 @@ def run_daemon():
 
         if cfg["enabled"] != "1":
             state.update(_make_daemon_state())
+            save_runtime_status(
+                "服务未启用",
+                state,
+                daemon_running=True,
+                enabled=False,
+                **build_runtime_snapshot(cfg, state),
+            )
             time.sleep(interval)
+            continue
+
+        action_handled, action_message = handle_runtime_action(cfg, state)
+        if action_handled:
+            save_runtime_status(
+                action_message,
+                state,
+                daemon_running=True,
+                enabled=True,
+                in_quiet=in_quiet_window(cfg),
+                **build_runtime_snapshot(cfg, state),
+            )
+            time.sleep(1)
             continue
 
         if in_quiet_window(cfg):
@@ -1744,6 +2072,14 @@ def run_daemon():
             message, sleep = _daemon_tick_active(cfg, state, interval)
 
         append_log(("[JXNU-SRun] " + message).strip())
+        save_runtime_status(
+            message,
+            state,
+            daemon_running=True,
+            enabled=True,
+            in_quiet=in_quiet_window(cfg),
+            **build_runtime_snapshot(cfg, state),
+        )
         time.sleep(sleep)
 
 
