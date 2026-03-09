@@ -140,6 +140,9 @@ jobs:
     if: github.event.inputs.publish_release == 'true'
     runs-on: ubuntu-22.04
     steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+
       - name: Validate release version
         run: |
           if [ -z "${{ github.event.inputs.version }}" ]; then
@@ -154,19 +157,25 @@ jobs:
           pattern: luci-app-jxnu-srun-ipk*
           merge-multiple: true
 
+      - name: Render pre-release notes from template
+        run: |
+          VERSION='${{ github.event.inputs.version }}'
+          OPENWRT_VERSION='${{ github.event.inputs.openwrt_version }}'
+          if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION='23.05.5'; fi
+          COMPARE_REF="main...${VERSION}"
+
+          sed \
+            -e "s/\${VERSION}/${VERSION}/g" \
+            -e "s/\${OPENWRT_VERSION}/${OPENWRT_VERSION}/g" \
+            -e "s/\${COMPARE_REF}/${COMPARE_REF}/g" \
+            .github/prerelease-template.md > prerelease-notes.md
+
       - name: Publish pre-release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: ${{ github.event.inputs.version }}
           files: artifacts/*.ipk
-          body: |
-            A new OpenWRT extension that helps you connect to JXNU SRun's network service.
-            一款新的 OpenWRT 扩展程序，可帮助您连接到江西师范大学校园网。
-
-            **⚠本版本为测试版
-            This is a testing version.**
-
-            本软件包为纯脚本（Lua/Python/Shell），与 CPU 架构无关，所有 OpenWrt 设备均可直接安装。
+          body_path: prerelease-notes.md
           prerelease: true
           overwrite_files: true
