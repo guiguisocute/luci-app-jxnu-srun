@@ -40,7 +40,6 @@ CONNECTIVITY_CACHE_SECONDS = 15
 SWITCH_DELAY_SECONDS = 2
 SSID_READY_TIMEOUT_SECONDS = 12
 SSID_EXPECTED_RETRY_SECONDS = 30
-ONLINE_CHECK_MAX_SECONDS = 60
 DISCONNECT_RETRY_DELAY_SECONDS = 3
 CAMPUS_FIXED_SSID = "jxnu_stu"
 CAMPUS_FIXED_ENCRYPTION = "none"
@@ -1938,7 +1937,7 @@ def _daemon_tick_quiet(cfg, state, interval):
 
 
 def _daemon_tick_active(cfg, state, interval):
-    online_interval = min(interval, ONLINE_CHECK_MAX_SECONDS)
+    online_interval = interval
     mode_msg = ""
 
     if state["was_in_quiet"]:
@@ -1990,8 +1989,6 @@ def _daemon_tick_active(cfg, state, interval):
 
         if online_now:
             message = "在线，下一次检测间隔 %d 秒" % online_interval
-            if not state["was_online"]:
-                message = "检测到在线，下一次检测间隔 %d 秒" % online_interval
             state["was_online"] = True
             next_sleep = online_interval
         else:

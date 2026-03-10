@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+.claude/
+AGENTS.md
+CLAUDE.md
+PLAN.md
