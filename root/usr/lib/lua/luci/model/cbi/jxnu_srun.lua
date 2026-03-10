@@ -244,9 +244,9 @@ overview_status = overview:option(DummyValue, "_overview_status", "")
 overview_status.rawhtml = true
 function overview_status.cfgvalue()
     return [[
-<div id="jxnu-srun-overview" style="margin:4px 0 18px 0;border-left:4px solid #c62828;background:linear-gradient(180deg,#2c1b1b 0%,#221616 100%);padding:14px 16px;border-radius:0 6px 6px 0;box-shadow:0 8px 24px rgba(0,0,0,.14);">
-  <div id="jxnu-srun-overview-title" style="font-size:18px;font-weight:700;color:#ffb4b4;margin-bottom:8px;">状态读取中</div>
-  <div id="jxnu-srun-overview-meta" style="font-size:13px;color:#f1d3d3;display:flex;gap:14px;flex-wrap:wrap;line-height:1.6;">
+<div id="jxnu-srun-overview" style="margin:4px 0 18px 0;border-left:4px solid #c62828;background:rgba(128,128,128,.08);padding:14px 16px;border-radius:0 6px 6px 0;box-shadow:none;">
+  <div id="jxnu-srun-overview-title" style="font-size:18px;font-weight:700;color:#1f2937;margin-bottom:8px;">状态读取中</div>
+  <div id="jxnu-srun-overview-meta" style="font-size:13px;color:#374151;display:flex;gap:14px;flex-wrap:wrap;line-height:1.6;">
     <span>WiFi: --</span>
     <span>模式: --</span>
     <span>连通性: --</span>
@@ -261,16 +261,16 @@ function overview_status.cfgvalue()
   window.__jxnuSrunOverviewInit = true;
 
   var palette = {
-    online: { border: '#2e7d32', bg1: '#16311b', bg2: '#112616', title: '#b8f2bb', meta: '#d6f3d7' },
-    portal: { border: '#ef6c00', bg1: '#352313', bg2: '#291b10', title: '#ffd08f', meta: '#f5dfbb' },
-    limited: { border: '#c62828', bg1: '#2c1b1b', bg2: '#221616', title: '#ffb4b4', meta: '#f1d3d3' },
-    offline: { border: '#6b7280', bg1: '#24272d', bg2: '#1d2025', title: '#d5d7dc', meta: '#c9ced6' }
+    online: { border: '#2e7d32', bg: 'rgba(46,125,50,.10)', title: '#166534', meta: '#166534' },
+    portal: { border: '#ef6c00', bg: 'rgba(239,108,0,.10)', title: '#b45309', meta: '#92400e' },
+    limited: { border: '#c62828', bg: 'rgba(198,40,40,.10)', title: '#b91c1c', meta: '#991b1b' },
+    offline: { border: '#6b7280', bg: 'rgba(107,114,128,.10)', title: '#374151', meta: '#4b5563' }
   };
 
   function applyTone(level) {
     var tone = palette[level] || palette.offline;
     root.style.borderLeftColor = tone.border;
-    root.style.background = 'linear-gradient(180deg,' + tone.bg1 + ' 0%,' + tone.bg2 + ' 100%)';
+    root.style.background = tone.bg;
     title.style.color = tone.title;
     meta.style.color = tone.meta;
   }
@@ -289,9 +289,6 @@ function overview_status.cfgvalue()
       try {
         var data = JSON.parse(xhr.responseText || '{}');
         var level = (typeof data.connectivity_level === 'string' && data.connectivity_level !== '') ? data.connectivity_level : 'offline';
-        if (data.enabled === false) {
-          level = 'limited';
-        }
         var status = (typeof data.status === 'string' && data.status !== '') ? data.status : '未知';
         var ssid = (typeof data.current_ssid === 'string' && data.current_ssid !== '') ? data.current_ssid : '未连接';
         var mode = (typeof data.mode_label === 'string' && data.mode_label !== '') ? data.mode_label : '未知模式';
@@ -329,23 +326,58 @@ if cfg.developer_mode == "1" then
 end
 s:tab("log", "日志")
 
-login_now = s:taboption("basic", Button, "_login_now", "立即登录")
-login_now.inputstyle = "apply"
-function login_now.write()
-    local out, err = run_client("--once", true)
-    if err then
-        m.message = "手动登录结果: " .. err
-        return
-    end
+manual_login = s:taboption("basic", DummyValue, "_manual_login", "手动登录")
+manual_login.rawhtml = true
+function manual_login.cfgvalue()
+    return [[
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+  <button id="jxnu-srun-manual-login" type="button" class="cbi-button cbi-button-apply">立即登录</button>
+  <button id="jxnu-srun-manual-logout" type="button" class="cbi-button cbi-button-reset">立即登出</button>
+  <span id="jxnu-srun-manual-result" style="color:#666;"></span>
+</div>
+<script type="text/javascript">
+(function() {
+  var login = document.getElementById('jxnu-srun-manual-login');
+  var logout = document.getElementById('jxnu-srun-manual-logout');
+  var result = document.getElementById('jxnu-srun-manual-result');
+  if (!login || !logout || !result || window.__jxnuSrunManualInit) return;
+  window.__jxnuSrunManualInit = true;
 
-    local line = last_nonempty_line(out)
-    if line == "" then
-        line = "已触发登录"
-    end
-    m.message = "手动登录结果: " .. line
+  function submit(action) {
+    result.textContent = '正在提交...';
+    login.disabled = true;
+    logout.disabled = true;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/cgi-bin/luci/admin/services/jxnu_srun/enqueue', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4) return;
+      login.disabled = false;
+      logout.disabled = false;
+      if (xhr.status !== 200) {
+        result.textContent = '提交失败';
+        return;
+      }
+      try {
+        var data = JSON.parse(xhr.responseText || '{}');
+        result.textContent = (typeof data.message === 'string' && data.message !== '') ? data.message : '已提交';
+      } catch (e) {
+        result.textContent = '提交失败';
+      }
+    };
+    xhr.send('action=' + encodeURIComponent(action));
+  }
+
+  login.addEventListener('click', function() { submit('manual_login'); });
+  logout.addEventListener('click', function() { submit('manual_logout'); });
+})();
+</script>
+]]
 end
 
 enabled = s:taboption("basic", Flag, "enabled", "启用")
+enabled.description = "仅控制后台自动登录守护服务（自动检测、自动重连、按时段自动上下线/切网）。手动登录和手动登出始终可用，不受此开关影响。"
 bind_flag(enabled, "enabled")
 
 user_id = s:taboption("basic", Value, "user_id", "学工号")

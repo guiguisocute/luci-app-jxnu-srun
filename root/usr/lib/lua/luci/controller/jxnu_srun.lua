@@ -69,6 +69,8 @@ function action_enqueue()
     local allowed = {
         switch_hotspot = true,
         switch_campus = true,
+        manual_login = true,
+        manual_logout = true,
     }
     local ok = allowed[action] == true
     local message = "不支持的动作"
@@ -79,7 +81,13 @@ function action_enqueue()
             requested_at = os.time(),
         })
         sys.call("(sleep 1; /etc/init.d/jxnu_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
-        message = action == "switch_hotspot" and "已提交切到热点请求" or "已提交切回校园网请求"
+        local messages = {
+            switch_hotspot = "已提交切到热点请求",
+            switch_campus = "已提交切回校园网请求",
+            manual_login = "已提交手动登录请求",
+            manual_logout = "已提交手动登出请求",
+        }
+        message = messages[action] or "已提交请求"
     end
 
     http.prepare_content("application/json")

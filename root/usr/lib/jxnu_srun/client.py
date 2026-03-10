@@ -1597,7 +1597,38 @@ def build_urls(base_url):
         "get_challenge_api": base_url + "/cgi-bin/get_challenge",
         "srun_portal_api": base_url + "/cgi-bin/srun_portal",
         "rad_user_info_api": base_url + "/cgi-bin/rad_user_info",
+        "rad_user_dm_api": base_url + "/cgi-bin/rad_user_dm",
     }
+
+
+def get_logout_username(cfg):
+    user_id = str(cfg.get("user_id", "")).strip()
+    if user_id:
+        return user_id
+    return str(cfg.get("username", "")).split("@", 1)[0].strip()
+
+
+def get_logout_sign(now_ts, username, ip, unbind="1"):
+    stamp = str(int(now_ts))
+    payload = stamp + str(username or "") + str(ip or "") + str(unbind) + stamp
+    return get_sha1(payload)
+
+
+def wait_for_logout_status(
+    rad_user_info_api, cfg, bind_ip=None, attempts=3, delay_seconds=1
+):
+    attempts = max(int(attempts), 1)
+    last_message = ""
+    for idx in range(attempts):
+        online, message = query_online_status(
+            rad_user_info_api, cfg["username"], bind_ip=bind_ip
+        )
+        last_message = message
+        if not online:
+            return True, message
+        if idx + 1 < attempts and delay_seconds > 0:
+            time.sleep(delay_seconds)
+    return False, last_message or "在线"
 
 
 def prepare_campus_for_login(cfg):
@@ -1640,6 +1671,13 @@ def get_token(get_challenge_api, username, ip, bind_ip=None):
 
 
 def query_online_status(rad_user_info_api, expected_username, bind_ip=None):
+    online, _, message = query_online_identity(
+        rad_user_info_api, expected_username, bind_ip
+    )
+    return online, message
+
+
+def query_online_identity(rad_user_info_api, expected_username, bind_ip=None):
     now = int(time.time() * 1000)
     params = {
         "callback": "jQuery112406118340540763985_" + str(now),
@@ -1650,13 +1688,15 @@ def query_online_status(rad_user_info_api, expected_username, bind_ip=None):
     )
     if str(data.get("error", "")).lower() != "ok":
         msg = data.get("error_msg") or data.get("error") or "unknown response"
-        return False, "离线: " + localize_error(msg)
+        return False, "", "离线: " + localize_error(msg)
 
     online_name = str(data.get("user_name", "")).strip()
     expected_main = expected_username.split("@", 1)[0]
     if bool(online_name) and online_name == expected_main:
-        return True, "在线"
-    return False, "离线"
+        return True, online_name, "在线"
+    if online_name:
+        return True, online_name, "在线账号: %s" % online_name
+    return False, "", "离线"
 
 
 def do_complex_work(cfg, ip, token):
@@ -1706,18 +1746,20 @@ def login(srun_portal_api, cfg, ip, i_value, hmd5, chksum, bind_ip=None):
     return success, str(message)
 
 
-def logout(srun_portal_api, cfg, ip, bind_ip=None):
-    now = int(time.time() * 1000)
+def logout(rad_user_dm_api, cfg, ip, bind_ip=None):
+    now = int(time.time())
+    username = get_logout_username(cfg)
+    unbind = "1"
     params = {
         "callback": "jQuery11240645308969735664_" + str(now),
-        "action": "logout",
-        "username": cfg["username"],
-        "ac_id": cfg["ac_id"],
+        "time": str(now),
+        "unbind": unbind,
         "ip": ip,
-        "_": now,
+        "username": username,
+        "sign": get_logout_sign(now, username, ip, unbind),
     }
     data = parse_jsonp(
-        http_get(srun_portal_api, params=params, timeout=5, bind_ip=bind_ip)
+        http_get(rad_user_dm_api, params=params, timeout=5, bind_ip=bind_ip)
     )
     error = str(data.get("error", "")).lower()
     result = str(data.get("res", "")).lower()
@@ -1776,6 +1818,74 @@ def run_once(cfg):
     return False, "登录失败: " + localize_error(message)
 
 
+def run_manual_logout(cfg):
+    if not cfg["username"]:
+        return False, "未配置学工号"
+
+    campus_ready, campus_msg = prepare_campus_for_login(cfg)
+    if not campus_ready:
+        return False, campus_msg
+
+    urls = build_urls(cfg["base_url"])
+    bip = resolve_bind_ip(urls["init_url"], cfg)
+
+    try:
+        ip = init_getip(urls["init_url"], bind_ip=bip)
+        ok, message = logout(urls["rad_user_dm_api"], cfg, ip, bind_ip=bip)
+        if ok:
+            offline, offline_msg = wait_for_logout_status(
+                urls["rad_user_info_api"], cfg, bind_ip=bip
+            )
+            if offline:
+                return True, "登出成功"
+            return False, "登出请求已发送，但当前仍在线（%s）" % localize_error(
+                offline_msg
+            )
+
+        localized = localize_error(message)
+        try:
+            online, online_msg = query_online_status(
+                urls["rad_user_info_api"], cfg["username"], bind_ip=bip
+            )
+            if not online:
+                return True, "已离线"
+            return False, "登出失败: " + localize_error(online_msg)
+        except Exception:
+            return False, "登出失败: " + localized
+    except Exception as exc:
+        return False, "登出失败: " + localize_error(exc)
+
+
+def run_manual_login(cfg):
+    urls = build_urls(cfg["base_url"])
+    target_user = get_logout_username(cfg)
+
+    try:
+        online_now, online_user, _ = query_online_identity(
+            urls["rad_user_info_api"], cfg["username"]
+        )
+    except Exception:
+        online_now, online_user = False, ""
+
+    need_logout_first = bool(online_now and online_user and online_user != target_user)
+
+    if need_logout_first:
+        logout_ok, logout_msg = run_manual_logout(cfg)
+    else:
+        logout_ok, logout_msg = True, ""
+
+    login_ok, login_msg = run_once_with_retry(cfg)
+    if login_ok:
+        if need_logout_first and logout_ok:
+            return True, "先登出后登录成功"
+        if need_logout_first:
+            return True, "登录成功（登出阶段: %s）" % logout_msg
+        return True, "登录成功"
+    if need_logout_first and logout_msg:
+        return False, "%s；登录阶段: %s" % (logout_msg, login_msg)
+    return False, login_msg
+
+
 def run_status(cfg):
     mode_hint = ""
     if failover_enabled(cfg):
@@ -1808,9 +1918,16 @@ def run_quiet_logout(cfg):
         return False, "夜间停用下线失败: 未配置学工号"
 
     ip = init_getip(urls["init_url"])
-    ok, message = logout(urls["srun_portal_api"], cfg, ip)
+    ok, message = logout(urls["rad_user_dm_api"], cfg, ip)
     if ok:
-        return True, "夜间停用下线成功"
+        offline, offline_msg = wait_for_logout_status(urls["rad_user_info_api"], cfg)
+        if offline:
+            return True, "夜间停用下线成功"
+        return (
+            False,
+            "夜间停用下线失败: 请求已发送，但当前仍在线（%s）"
+            % localize_error(offline_msg),
+        )
     return False, "夜间停用下线失败: " + localize_error(message)
 
 
@@ -1837,6 +1954,32 @@ def handle_runtime_action(cfg, state):
         "switch_hotspot": True,
         "switch_campus": False,
     }
+    if action == "manual_login":
+        ok, message = run_manual_login(cfg)
+        append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+        save_runtime_status(
+            message,
+            state,
+            last_action=action,
+            action_result="ok" if ok else "error",
+            pending_action="",
+            **build_runtime_snapshot(cfg, state),
+        )
+        return True, message
+
+    if action == "manual_logout":
+        ok, message = run_manual_logout(cfg)
+        append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+        save_runtime_status(
+            message,
+            state,
+            last_action=action,
+            action_result="ok" if ok else "error",
+            pending_action="",
+            **build_runtime_snapshot(cfg, state),
+        )
+        return True, message
+
     if action not in action_map:
         message = "忽略未知动作: %s" % action
         append_log("[JXNU-SRun] %s" % message)
@@ -2038,29 +2181,29 @@ def run_daemon():
         cfg = load_config()
         interval = max(int(cfg["interval"]), 5)
 
-        if cfg["enabled"] != "1":
-            state.update(_make_daemon_state())
-            save_runtime_status(
-                "服务未启用",
-                state,
-                daemon_running=True,
-                enabled=False,
-                **build_runtime_snapshot(cfg, state),
-            )
-            time.sleep(interval)
-            continue
-
         action_handled, action_message = handle_runtime_action(cfg, state)
         if action_handled:
             save_runtime_status(
                 action_message,
                 state,
                 daemon_running=True,
-                enabled=True,
+                enabled=(cfg.get("enabled") == "1"),
                 in_quiet=in_quiet_window(cfg),
                 **build_runtime_snapshot(cfg, state),
             )
             time.sleep(1)
+            continue
+
+        if cfg["enabled"] != "1":
+            state.update(_make_daemon_state())
+            save_runtime_status(
+                "自动登录服务未启用",
+                state,
+                daemon_running=True,
+                enabled=False,
+                **build_runtime_snapshot(cfg, state),
+            )
+            time.sleep(interval)
             continue
 
         if in_quiet_window(cfg):
@@ -2084,6 +2227,8 @@ def main():
     parser = argparse.ArgumentParser(description="JXNU SRun client for OpenWrt")
     parser.add_argument("--daemon", action="store_true", help="run as daemon loop")
     parser.add_argument("--once", action="store_true", help="run login once")
+    parser.add_argument("--logout", action="store_true", help="logout current account")
+    parser.add_argument("--relogin", action="store_true", help="logout then login once")
     parser.add_argument("--status", action="store_true", help="query online status")
     parser.add_argument(
         "--switch-hotspot", action="store_true", help="switch STA profile to hotspot"
@@ -2103,6 +2248,22 @@ def main():
         print("参数错误：不能同时指定 --switch-hotspot 和 --switch-campus")
         return
 
+    selected = sum(
+        1
+        for flag in [
+            args.once,
+            args.logout,
+            args.relogin,
+            args.status,
+            args.switch_hotspot,
+            args.switch_campus,
+        ]
+        if flag
+    )
+    if selected > 1:
+        print("参数错误：一次只能执行一种操作")
+        return
+
     if args.switch_hotspot:
         _, message = run_switch(cfg, expect_hotspot=True)
         append_log("[JXNU-SRun] 手动切换热点结果: " + message)
@@ -2112,6 +2273,18 @@ def main():
     if args.switch_campus:
         _, message = run_switch(cfg, expect_hotspot=False)
         append_log("[JXNU-SRun] 手动切换校园网结果: " + message)
+        print(message)
+        return
+
+    if args.logout:
+        ok, message = run_manual_logout(cfg)
+        append_log("[JXNU-SRun] 手动登出结果: " + message)
+        print(message)
+        return
+
+    if args.relogin:
+        ok, message = run_manual_login(cfg)
+        append_log("[JXNU-SRun] 手动登录结果: " + message)
         print(message)
         return
 
