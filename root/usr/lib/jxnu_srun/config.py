@@ -52,6 +52,7 @@ GLOBAL_SCALAR_KEYS = {
     "n",
     "type",
     "enc",
+    "school",
 }
 
 POINTER_KEYS = {
@@ -81,6 +82,17 @@ LEGACY_HOTSPOT_KEYS = {
 }
 
 OPERATORS = {"cmcc", "ctcc", "cucc", "xn"}
+
+
+def normalize_wifi_encryption(value):
+    enc = str(value or "").strip().lower()
+    if enc in ("", "none", "open", "nopass"):
+        return "none"
+    return enc
+
+
+def wifi_key_required(encryption):
+    return normalize_wifi_encryption(encryption) != "none"
 
 
 def _load_defaults():
@@ -124,6 +136,7 @@ def _load_defaults():
         "n": "200",
         "type": "1",
         "enc": "srun_bx1",
+        "school": "jxnu",
         "active_campus_id": "",
         "default_campus_id": "",
         "active_hotspot_id": "",
@@ -200,9 +213,11 @@ def save_json_raw_config(raw_cfg):
         payload[key] = val if isinstance(val, list) else []
 
     ensure_parent_dir(JSON_CONFIG_FILE)
-    with open(JSON_CONFIG_FILE, "w", encoding="utf-8") as wf:
+    tmp_path = JSON_CONFIG_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as wf:
         json.dump(payload, wf, ensure_ascii=False, indent=2, sort_keys=True)
         wf.write("\n")
+    os.replace(tmp_path, JSON_CONFIG_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +494,6 @@ def _is_legacy_config(raw):
 
 
 def _migrate_legacy_config(raw):
-    from wireless import normalize_wifi_encryption
 
     migrated = {}
     for key in GLOBAL_SCALAR_KEYS:
@@ -577,7 +591,6 @@ def get_active_hotspot_profile(cfg):
 
 
 def resolve_active_items(cfg):
-    from wireless import normalize_wifi_encryption
 
     campus = get_active_campus_account(cfg)
     hotspot = get_active_hotspot_profile(cfg)

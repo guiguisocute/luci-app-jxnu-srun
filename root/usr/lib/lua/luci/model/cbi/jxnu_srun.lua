@@ -17,7 +17,7 @@ local GLOBAL_SCALAR_KEYS = {
     "connectivity_check_mode",
     "backoff_exponent_factor", "backoff_inter_const_factor",
     "backoff_outer_const_factor", "interval", "developer_mode",
-    "sta_iface", "n", "type", "enc",
+    "sta_iface", "n", "type", "enc", "school",
 }
 -- 指针字段名
 local POINTER_KEYS = {
@@ -43,6 +43,7 @@ local SCALAR_DEFAULTS = {
     backoff_outer_const_factor = "0", interval = "60",
     developer_mode = "0", sta_iface = "",
     n = "200", ["type"] = "1", enc = "srun_bx1",
+    school = "jxnu",
 }
 -- 旧版字段（用于迁移检测）
 local LEGACY_CAMPUS_KEYS = {
@@ -274,6 +275,13 @@ local RADIO_CHOICES = load_radio_choices()
 local cfg = load_cfg()
 local changed = false
 
+-- 加载学校 Profile 列表
+local schools_json = util.trim(sys.exec(
+    find_python() .. " -B /usr/lib/jxnu_srun/client.py --list-schools 2>/dev/null"
+) or "")
+local schools = jsonc.parse(schools_json)
+if type(schools) ~= "table" then schools = {} end
+
 local function set_value(key, value)
     local v = tostring(value or "")
     if cfg[key] ~= v then
@@ -415,6 +423,99 @@ s.anonymous = true
 s:tab("basic", "基础设置")
 s:tab("advanced", "进阶设置")
 s:tab("log", "日志")
+
+-- 学校配置选择器
+school = s:taboption("basic", ListValue, "school", "登录配置")
+if #schools == 0 then
+    school:value("jxnu", "默认配置")
+else
+    for _, sch in ipairs(schools) do
+        school:value(sch.short_name, sch.name)
+    end
+end
+function school.cfgvalue()
+    return cfg.school or "jxnu"
+end
+function school.write(self, section, value)
+    set_value("school", util.trim(value or "jxnu"))
+end
+
+-- 学校信息提示区（Lua 预渲染当前学校 + JS 动态切换）
+school_info = s:taboption("basic", DummyValue, "_school_info", "")
+school_info.rawhtml = true
+function school_info.cfgvalue()
+    -- 服务端预渲染：查找当前选中学校的信息
+    local current_school = cfg.school or "jxnu"
+    local cur_desc = ""
+    local cur_contrib = ""
+    for _, sch in ipairs(schools) do
+        if sch.short_name == current_school then
+            cur_desc = tostring(sch.description or "")
+            if type(sch.contributors) == "table" and #sch.contributors > 0 then
+                cur_contrib = "贡献者: " .. table.concat(sch.contributors, ", ")
+            end
+            break
+        end
+    end
+    local show = (cur_desc ~= "") and "block" or "none"
+
+    -- 将全量学校数据序列化给 JS 用于动态切换
+    local js_data = jsonc.stringify(schools) or "[]"
+
+    return string.format([[
+<div id="jxnu-school-info"
+     style="margin:-8px 0 12px 0;padding:8px 14px;
+            color:#166534;font-size:13px;line-height:1.7;
+            border-left:3px solid #16a34a;background:rgba(22,163,52,.06);
+            border-radius:0 4px 4px 0;display:%s;">
+  <div id="jxnu-school-desc">%s</div>
+  <div id="jxnu-school-contrib" style="margin-top:2px;">%s</div>
+</div>
+<script type="text/javascript">
+(function() {
+  if (window.__jxnuSchoolInfoInit) return;
+  window.__jxnuSchoolInfoInit = true;
+  var schools = %s;
+  var infoBox = document.getElementById('jxnu-school-info');
+  var descEl  = document.getElementById('jxnu-school-desc');
+  var contribEl = document.getElementById('jxnu-school-contrib');
+  if (!infoBox) return;
+
+  function lookup(sn) {
+    for (var i = 0; i < schools.length; i++) {
+      if (schools[i].short_name === sn) return schools[i];
+    }
+    return null;
+  }
+
+  function update(val) {
+    var s = lookup(val);
+    if (!s) { infoBox.style.display = 'none'; return; }
+    infoBox.style.display = 'block';
+    descEl.textContent = s.description || '';
+    contribEl.textContent = (s.contributors && s.contributors.length)
+      ? '\u8d21\u732e\u8005: ' + s.contributors.join(', ')
+      : '';
+  }
+
+  // 找下拉框：遍历所有 select 找含 school option 值的那个
+  var allSelects = document.querySelectorAll('select');
+  var sel = null;
+  for (var i = 0; i < allSelects.length; i++) {
+    var opts = allSelects[i].options;
+    for (var j = 0; j < opts.length; j++) {
+      if (opts[j].value === '%s') { sel = allSelects[i]; break; }
+    }
+    if (sel) break;
+  }
+
+  if (sel) {
+    sel.addEventListener('change', function() { update(sel.value); });
+  }
+})();
+</script>
+]], show, cur_desc, cur_contrib, js_data, current_school)
+end
 
 manual_login = s:taboption("basic", DummyValue, "_manual_login", "手动登录")
 manual_login.rawhtml = true

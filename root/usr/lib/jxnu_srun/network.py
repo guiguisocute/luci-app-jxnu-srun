@@ -10,6 +10,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 
 try:
     import urllib.error as urllib_error
@@ -197,8 +198,6 @@ def get_ipv4_from_network_interface(iface_name):
     return None
 
 
-import time  # noqa: E402 (grouped with usage below)
-
 
 def wait_for_network_interface_ipv4(iface_name, timeout_seconds=12, interval_seconds=1):
     deadline = time.time() + max(int(timeout_seconds), 1)
@@ -306,7 +305,7 @@ def test_internet_connectivity(timeout=5):
     return False, "无法访问连通性检测服务器"
 
 
-def _test_portal_reachability(cfg, timeout=3):
+def test_portal_reachability(cfg, timeout=3):
     base_url = str(cfg.get("base_url", "")).strip()
     if not base_url:
         return False, "认证网关地址未配置"

@@ -15,6 +15,8 @@ from config import (
     get_switch_ready_timeout_seconds,
     hotspot_failback_enabled,
     normalize_campus_access_mode,
+    normalize_wifi_encryption,
+    wifi_key_required,
     SWITCH_DELAY_SECONDS,
     SSID_EXPECTED_RETRY_SECONDS,
     SSID_READY_TIMEOUT_SECONDS,
@@ -27,25 +29,14 @@ from network import (
     parse_uci_value,
     run_cmd,
     test_internet_connectivity,
-    _test_portal_reachability,
+    test_portal_reachability,
     wait_for_network_interface_ipv4,
 )
 
 
 # ---------------------------------------------------------------------------
-# WiFi encryption helpers
+# WiFi helpers
 # ---------------------------------------------------------------------------
-
-def normalize_wifi_encryption(value):
-    enc = str(value or "").strip().lower()
-    if enc in ("", "none", "open", "nopass"):
-        return "none"
-    return enc
-
-
-def wifi_key_required(encryption):
-    return normalize_wifi_encryption(encryption) != "none"
-
 
 def split_network_value(value):
     return [x for x in str(value or "").split() if x]
@@ -864,7 +855,7 @@ def switch_sta_profile(cfg, expect_hotspot):
             section, timeout_seconds=get_switch_ready_timeout_seconds(cfg)
         )
         if ip:
-            portal_ok, portal_detail = _test_portal_reachability(cfg)
+            portal_ok, portal_detail = test_portal_reachability(cfg)
             if portal_ok:
                 conn_hint = "网关可达"
             else:

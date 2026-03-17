@@ -166,10 +166,13 @@ for _, k in ipairs({
     "enabled", "quiet_hours_enabled", "quiet_start", "quiet_end",
     "force_logout_in_quiet", "failover_enabled", "backoff_enable",
     "backoff_max_retries", "backoff_initial_duration", "backoff_max_duration",
-    "manual_terminal_check_max_attempts",
+    "retry_cooldown_seconds", "retry_max_cooldown_seconds",
+    "switch_ready_timeout_seconds", "manual_terminal_check_max_attempts",
+    "manual_terminal_check_interval_seconds", "hotspot_failback_enabled",
+    "connectivity_check_mode",
     "backoff_exponent_factor", "backoff_inter_const_factor",
     "backoff_outer_const_factor", "interval", "developer_mode",
-    "sta_iface", "n", "type", "enc",
+    "sta_iface", "n", "type", "enc", "school",
 }) do GLOBAL_SCALAR_KEYS_SET[k] = true end
 
 local POINTER_KEYS_LIST = {

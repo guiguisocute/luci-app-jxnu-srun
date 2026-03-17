@@ -19,7 +19,7 @@ from network import (
 )
 
 
-def _get_profile(cfg):
+def get_profile(cfg):
     """根据 cfg 中的 school 字段获取 profile 实例，找不到则使用默认"""
     try:
         import schools
@@ -130,14 +130,14 @@ def wait_for_logout_status(
 # ---------------------------------------------------------------------------
 
 def build_urls(cfg):
-    profile = _get_profile(cfg)
+    profile = get_profile(cfg)
     return profile.build_urls(cfg["base_url"])
 
 
 def run_once(cfg):
     """纯认证流程：challenge -> 加密 -> login API。
     不管 WiFi、不管 quiet hours、不管重试。"""
-    profile = _get_profile(cfg)
+    profile = get_profile(cfg)
     urls = profile.build_urls(cfg["base_url"])
     bip = resolve_bind_ip(urls["init_url"], cfg)
     ip = init_getip(urls["init_url"], bind_ip=bip)

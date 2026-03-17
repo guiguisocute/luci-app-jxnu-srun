@@ -22,11 +22,11 @@ class SchoolProfile:
     NAME = "默认 SRun"
     SHORT_NAME = "default"
     DESCRIPTION = "深澜 SRun 4000 系列认证（默认实现）"
-    CONTRIBUTORS = []
+    CONTRIBUTORS = ()
 
     # -- 运营商 --
-    OPERATORS = []
-    NO_SUFFIX_OPERATORS = []
+    OPERATORS = ()
+    NO_SUFFIX_OPERATORS = ()
 
     # -- 协议参数 --
     ALPHA = crypto.ALPHA

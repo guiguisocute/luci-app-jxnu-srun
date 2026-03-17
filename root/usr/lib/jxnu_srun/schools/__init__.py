@@ -33,8 +33,9 @@ def _discover():
             if hasattr(mod, "Profile"):
                 profile = mod.Profile()
                 _PROFILES[profile.SHORT_NAME] = profile
-        except Exception:
-            pass
+        except Exception as exc:
+            import sys as _sys
+            print("WARN: schools: skip %s: %s" % (fname, exc), file=_sys.stderr)
     _LOADED = True
 
 
@@ -50,8 +51,8 @@ def list_schools():
             "short_name": p.SHORT_NAME,
             "name": p.NAME,
             "description": p.DESCRIPTION,
-            "contributors": p.CONTRIBUTORS,
-            "operators": p.OPERATORS,
+            "contributors": list(p.CONTRIBUTORS),
+            "operators": list(p.OPERATORS),
         }
         for p in sorted(_PROFILES.values(), key=lambda p: p.SHORT_NAME)
     ]

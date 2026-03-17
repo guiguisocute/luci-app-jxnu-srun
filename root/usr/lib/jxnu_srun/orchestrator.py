@@ -45,6 +45,7 @@ from wireless import (
     wait_for_network_interface_ipv4,
 )
 import srun_auth
+from snapshot import build_runtime_snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +159,7 @@ def quiet_connection_state(cfg, urls=None):
     if urls is None:
         urls = srun_auth.build_urls(cfg)
 
-    profile = srun_auth._get_profile(cfg)
+    profile = srun_auth.get_profile(cfg)
     try:
         online, _ = srun_auth.query_online_status(
             profile, urls["rad_user_info_api"], cfg["username"]
@@ -178,7 +179,7 @@ def run_status(cfg):
         )
 
     urls = srun_auth.build_urls(cfg)
-    profile = srun_auth._get_profile(cfg)
+    profile = srun_auth.get_profile(cfg)
 
     if in_quiet_window(cfg):
         state = quiet_connection_state(cfg, urls)
@@ -195,7 +196,7 @@ def run_status(cfg):
 
 def run_quiet_logout(cfg):
     urls = srun_auth.build_urls(cfg)
-    profile = srun_auth._get_profile(cfg)
+    profile = srun_auth.get_profile(cfg)
 
     if cfg.get("force_logout_in_quiet") != "1":
         state = quiet_connection_state(cfg, urls)
@@ -239,7 +240,7 @@ def run_manual_logout(cfg, override_user_id=None):
     if not cfg["username"]:
         return False, "未配置学工号"
 
-    profile = srun_auth._get_profile(cfg)
+    profile = srun_auth.get_profile(cfg)
     urls = srun_auth.build_urls(cfg)
     bip = resolve_bind_ip(urls["init_url"], cfg)
 
@@ -432,14 +433,11 @@ def clean_slate_for_manual_login(cfg, online_user=""):
 # ---------------------------------------------------------------------------
 
 def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
-    # 延迟导入避免循环（daemon.py 也导入 orchestrator）
-    from daemon import build_runtime_snapshot
-
     attempts = max(int(attempts), 1)
     last_message = ""
     ready_label = get_manual_terminal_check_label(cfg)
     wired_mode = campus_uses_wired(cfg)
-    profile = srun_auth._get_profile(cfg)
+    profile = srun_auth.get_profile(cfg)
     urls = srun_auth.build_urls(cfg)
     bind_ip = resolve_bind_ip(urls["init_url"], cfg)
     for idx in range(attempts):
@@ -506,7 +504,7 @@ def run_manual_login(cfg):
             )
 
         cfg, _, _ = apply_default_selection_for_runtime(False, "手动登录前")
-        profile = srun_auth._get_profile(cfg)
+        profile = srun_auth.get_profile(cfg)
         urls = srun_auth.build_urls(cfg)
 
         try:
