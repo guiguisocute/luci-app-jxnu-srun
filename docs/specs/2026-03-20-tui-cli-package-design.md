@@ -13,10 +13,12 @@
 
 ## 约束
 
-- 目标环境：OpenWrt 路由器，`python3-light` + `python3-curses`
+- 目标环境：OpenWrt 路由器，`python3-light`；`python3-curses` 为可选依赖（仅 `--tui` / `--config` 需要）
 - 最小终端：80x24
 - TUI 与 daemon 通过文件轮询通信（沿用现有 state.json / action.json 机制）
 - 不改动现有 Python 模块（daemon.py、config.py、orchestrator.py 等），TUI 是纯新增的视图层
+- TUI 模块 guard import：`--tui` / `--config` 启动时检查 curses 可用性，不可用时打印 `请安装 python3-curses` 并退出
+- 所有 TUI 入口必须使用 `curses.wrapper()` 确保异常/Ctrl+C 时终端正确恢复
 
 ## 模块架构
 
@@ -80,7 +82,7 @@ parser.add_argument("--config", action="store_true", help="interactive config wi
 | 状态 | `connectivity_level` | `● 在线`(绿) / `● 认证中`(黄) / `● 离线`(红) |
 | 模式 | `mode_label` | 原样 |
 | 账号 | `campus_account_label` | 原样 |
-| 守护 | `daemon_running` + `enabled` | 运行中/已停止/未启用 |
+| 守护 | `daemon_running` + `enabled` + `updated_at` | 见下方存活检测 |
 | IP | `current_ip` | 空则 `--` |
 | SSID | `current_ssid` | 空则 `--` |
 | 连通性 | `connectivity` | 原样 |
@@ -97,18 +99,29 @@ parser.add_argument("--config", action="store_true", help="interactive config wi
 | `R` | 立即刷新 | 重读 state.json + 日志文件 |
 | `Q` | 退出 | 退出 curses，恢复终端 |
 
+### Daemon 存活检测
+
+`daemon_running` 字段由 daemon 自身写入，daemon 崩溃后不会自更新。TUI 通过以下策略判断：
+
+- 读取 `updated_at`，若 `now - updated_at > 2 * interval`，判定 daemon 疑似死亡
+- 状态显示为 `● 守护进程无响应`（红色），而非信任 `daemon_running` 字段
+- 操作键（L/O/H/C）在 daemon 无响应状态下禁用，底部提示 `守护进程未运行，操作不可用`
+
 ### 操作反馈流程
 
-1. 用户按操作键 → 底部变为 `确认XXX? [Y/N]`
-2. 按 `Y` → 写 action.json，状态栏显示 `⏳ 已提交: XXX`（黄色）
-3. 轮询 state.json 发现 `pending_action` 清空 → 显示结果（绿/红）
-4. 3 秒后恢复正常显示
+1. 用户按操作键 → 先检查 daemon 存活，未运行则提示并拒绝
+2. 底部变为 `确认XXX? [Y/N]`
+3. 按 `Y` → 写 action.json，状态栏显示 `⏳ 已提交: XXX`（黄色）
+4. 轮询 state.json 发现 `pending_action` 清空 → 显示结果（绿/红）
+5. 超时 10 秒未响应 → 显示 `⚠ 操作超时，守护进程可能未运行`（红色）
+6. 3 秒后恢复正常显示
 
 ### 刷新机制
 
 - `curses.halfdelay(10)` — 1 秒无输入自动刷新
 - `stat()` state.json 检查 mtime，变化才重读
 - 日志文件：记录 seek 位置，只读增量追加到缓冲区
+- 日志轮转处理：若文件大小 < 已记录 seek 位置，说明发生了轮转，重置 seek 到 0 重新加载
 
 ## 配置向导（--config）
 
@@ -217,7 +230,10 @@ SSID故障转移 < 开启 ▸ >
 ### 数据持久化
 
 - 读：`load_config()` 加载 config.json
-- 写：`F2` 保存时直接写 config.json
+- 写：`F2` 保存时原子写入（先写临时文件，再 `os.rename()` 覆盖），避免 daemon 读到半写状态
+- 新建账号/热点的 ID 生成复用 config.py 的 `_next_id()` 逻辑
+- 首次使用（config.json 不存在）：`load_config()` 已有默认值处理，向导正常工作
+- 至少保留一个校园网账号，删到最后一个时禁止删除
 - 不经过 UCI，纯 CLI 版直接操作 JSON
 
 ## 组件库 tui_widgets.py
@@ -261,6 +277,13 @@ COLOR_SELECT = 6  # 反色 — 当前选中项
 - 宽 < 40 或高 < 10：显示 "终端太小"
 - `KEY_RESIZE` 触发重绘
 
+**单色终端降级**：
+- 启动时 `curses.has_colors()` 检测，不支持颜色时降级为 `A_BOLD` / `A_REVERSE` / `A_UNDERLINE` 属性区分
+
+**EditField 编辑行为**：
+- 支持 Backspace 删除、←→ 光标移动、Home/End 跳转首尾
+- 输入超出可见宽度时水平滚动显示
+
 ## 包结构与发行
 
 ### 包关系
@@ -268,7 +291,7 @@ COLOR_SELECT = 6  # 反色 — 当前选中项
 ```
 jxnu-srun (基础包)              luci-app-jxnu-srun (附加包)
 ├── Depends: python3-light      ├── Depends: jxnu-srun
-│            python3-curses     │            luci-base
+│            python3-curses(*)  │            luci-base
 │                               │
 ├── /usr/lib/jxnu_srun/         ├── /usr/lib/lua/luci/
 │   ├── client.py               │   ├── controller/jxnu_srun.lua
@@ -291,6 +314,8 @@ jxnu-srun (基础包)              luci-app-jxnu-srun (附加包)
 
 ### Makefile
 
+(*) `python3-curses` 为推荐依赖，headless 用户可不装，`--tui`/`--config` 启动时会检查并提示。
+
 ```makefile
 define Package/jxnu-srun
   SECTION:=net
@@ -298,6 +323,7 @@ define Package/jxnu-srun
   TITLE:=JXNU SRun client (CLI/TUI)
   DEPENDS:=+python3-light +python3-curses
 endef
+# 注：OpenWrt Makefile 中 DEPENDS 的 + 前缀表示推荐安装但可被用户移除
 
 define Package/luci-app-jxnu-srun
   SECTION:=luci
