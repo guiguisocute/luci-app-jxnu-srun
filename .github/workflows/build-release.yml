@@ -108,6 +108,7 @@ jobs:
         working-directory: openwrt
         run: |
           echo "CONFIG_ALL_KMODS=n" >> .config
+          echo "CONFIG_PACKAGE_jxnu-srun=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-jxnu-srun=y" >> .config
           make defconfig
 
@@ -119,18 +120,22 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p artifacts
-          SRC_IPK="$(find openwrt/bin/packages -type f -name 'luci-app-jxnu-srun*.ipk' | head -n1)"
-          if [ -z "$SRC_IPK" ]; then
+          for pattern in 'jxnu-srun_*.ipk' 'luci-app-jxnu-srun*.ipk'; do
+            IPK="$(find openwrt/bin/packages -type f -name "$pattern" | head -n1)"
+            if [ -n "$IPK" ]; then
+              cp -v "$IPK" "artifacts/$(basename "$IPK")"
+            fi
+          done
+          if [ -z "$(ls artifacts/*.ipk 2>/dev/null)" ]; then
             echo "Failed: no ipk found."
             exit 1
           fi
-          cp -v "$SRC_IPK" "artifacts/$(basename "$SRC_IPK")"
           ls -lh artifacts/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-jxnu-srun-ipk
+          name: jxnu-srun-ipk
           path: artifacts/*.ipk
 
   publish:
@@ -147,7 +152,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: luci-app-jxnu-srun-ipk*
+          pattern: jxnu-srun-ipk*
           merge-multiple: true
 
       - name: Render release notes from template

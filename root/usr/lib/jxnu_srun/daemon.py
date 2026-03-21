@@ -7,11 +7,14 @@
 import time
 
 from config import (
+    LOG_FILE,
     append_log,
+    log,
     campus_uses_wired,
     failover_enabled,
     in_quiet_window,
     load_config,
+    load_json_raw_config,
     localize_error,
     pop_runtime_action,
     save_runtime_status,
@@ -110,7 +113,7 @@ def handle_runtime_action(cfg, state):
 
     if action == "manual_login":
         ok, message = orchestrator.run_manual_login(cfg)
-        append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+        log("INFO", "action_result", message, action=action, ok=ok)
         save_runtime_status(
             message,
             state,
@@ -125,7 +128,7 @@ def handle_runtime_action(cfg, state):
 
     if action == "manual_logout":
         ok, message = orchestrator.run_manual_logout(cfg)
-        append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+        log("INFO", "action_result", message, action=action, ok=ok)
         save_runtime_status(
             message,
             state,
@@ -140,7 +143,7 @@ def handle_runtime_action(cfg, state):
 
     if action not in action_map:
         message = "忽略未知动作: %s" % action
-        append_log("[JXNU-SRun] %s" % message)
+        log("WARN", "action_unknown", message, action=action)
         save_runtime_status(
             message,
             state,
@@ -159,7 +162,7 @@ def handle_runtime_action(cfg, state):
         state["current_mode"] = target_mode
         if not action_map[action]:
             state["last_switch_ts"] = 0
-    append_log("[JXNU-SRun] 异步动作 %s: %s" % (action, message))
+    log("INFO", "action_result", message, action=action, ok=ok)
     save_runtime_status(
         message,
         state,
@@ -229,7 +232,7 @@ def _daemon_tick_active(cfg, state, interval):
     mode_msg = ""
 
     if state["was_in_quiet"]:
-        append_log("[JXNU-SRun] 退出夜间时段，准备切回校园网配置")
+        log("INFO", "quiet_exit", "leaving quiet hours, switching back to campus")
         state["quiet_logout_done"] = False
         state["was_in_quiet"] = False
         state["was_online"] = False
@@ -282,26 +285,26 @@ def _daemon_tick_active(cfg, state, interval):
             next_sleep = online_interval
         else:
             if state["was_online"]:
-                append_log("[JXNU-SRun] 检测到断线，立即开始重连")
+                log("WARN", "disconnect_detected", "disconnected, reconnecting immediately")
             state["was_online"] = False
             ok, message = orchestrator.run_once_with_retry(cfg)
             state["was_online"] = bool(ok)
             if not ok and status_message:
                 message = "%s；状态检测结果: %s" % (message, status_message)
     except HTTP_EXCEPTIONS as exc:
-        append_log("[JXNU-SRun] 状态检测网络异常，尝试重连")
+        log("WARN", "status_check_error", "network error during status check, reconnecting", error_type="network")
         state["was_online"] = False
         ok, message = orchestrator.run_once_with_retry(cfg)
         if not ok:
             message = "网络异常: %s；重连结果: %s" % (localize_error(exc), message)
     except ValueError as exc:
-        append_log("[JXNU-SRun] 状态检测解析异常，尝试重连")
+        log("WARN", "status_check_error", "parse error during status check, reconnecting", error_type="parse")
         state["was_online"] = False
         ok, message = orchestrator.run_once_with_retry(cfg)
         if not ok:
             message = "解析异常: %s；重连结果: %s" % (localize_error(exc), message)
     except Exception as exc:
-        append_log("[JXNU-SRun] 状态检测异常，尝试重连")
+        log("WARN", "status_check_error", "unexpected error during status check, reconnecting", error_type="unknown")
         state["was_online"] = False
         ok, message = orchestrator.run_once_with_retry(cfg)
         if not ok:
@@ -358,12 +361,11 @@ def run_daemon():
         else:
             message, sleep = _daemon_tick_active(cfg, state, interval)
 
-        append_log(("[JXNU-SRun] " + message).strip())
         save_runtime_status(
             message,
             state,
             daemon_running=True,
-            enabled=True,
+            enabled=cfg.get("enabled", "0"),
             in_quiet=in_quiet_window(cfg),
             **build_runtime_snapshot(cfg, state),
         )
@@ -371,91 +373,589 @@ def run_daemon():
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI: log
+# ---------------------------------------------------------------------------
+
+def _tail_log(last_n):
+    """Tail the daemon log file. If last_n > 0, show last N lines and exit."""
+    import os as _os
+
+    if not _os.path.exists(LOG_FILE):
+        print("Log file not found: %s" % LOG_FILE)
+        return
+
+    show_n = last_n if last_n > 0 else 20
+    with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+        for line in lines[-show_n:]:
+            print(line, end="")
+        pos = f.tell()
+
+    if last_n > 0:
+        return
+
+    try:
+        while True:
+            try:
+                size = _os.path.getsize(LOG_FILE)
+            except OSError:
+                time.sleep(1)
+                continue
+            if size < pos:
+                pos = 0
+            if size == pos:
+                time.sleep(0.5)
+                continue
+            with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(pos)
+                new = f.read()
+                pos = f.tell()
+            if new:
+                print(new, end="", flush=True)
+    except KeyboardInterrupt:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# CLI: status
+# ---------------------------------------------------------------------------
+
+def _show_status(cfg):
+    """Print full runtime status matching LuCI status endpoint."""
+    from config import load_runtime_state, load_json_raw_config
+
+    state = load_runtime_state()
+    raw = load_json_raw_config()
+
+    ok, message = orchestrator.run_status(cfg)
+
+    conn = state.get("connectivity", "--") or "--"
+    conn_level = str(state.get("connectivity_level", "")).strip()
+    ip = state.get("current_ip", "--") or "--"
+    ssid = state.get("current_ssid", "--") or "--"
+    mode_label = state.get("mode_label", "--") or "--"
+    account = state.get("campus_account_label", "--") or "--"
+    interval = raw.get("interval", "60")
+    enabled = raw.get("enabled", "0") == "1"
+    in_quiet = state.get("in_quiet", False)
+    daemon_running = state.get("daemon_running", False)
+
+    if ok and conn_level == "online":
+        status_str = "在线"
+    elif in_quiet:
+        status_str = "夜间停用"
+    else:
+        status_str = message or "离线"
+
+    print("=== JXNU SRun Status ===\n")
+    print("  状态:   %s" % status_str)
+    print("  模式:   %s" % mode_label)
+    print("  账号:   %s" % account)
+    print("  IP:     %s" % ip)
+    print("  SSID:   %s" % ssid)
+    print("  连通:   %s" % conn)
+    print("  守护:   %s" % ("运行中" if daemon_running else ("已禁用" if not enabled else "已停止")))
+    print("  间隔:   %ss" % interval)
+
+    if state.get("last_action"):
+        ts = state.get("last_action_ts", 0)
+        result = state.get("action_result", "")
+        from datetime import datetime, timezone, timedelta
+        ts_str = ""
+        if ts:
+            try:
+                ts_str = datetime.fromtimestamp(int(ts), tz=timezone(timedelta(hours=8))).strftime(" (%H:%M:%S)")
+            except (ValueError, TypeError, OSError):
+                pass
+        print("\n  最近操作: %s -> %s%s" % (state["last_action"], result, ts_str))
+
+    if in_quiet:
+        print("  夜间时段: %s - %s" % (raw.get("quiet_start", "?"), raw.get("quiet_end", "?")))
+
+
+# ---------------------------------------------------------------------------
+# CLI: config show
+# ---------------------------------------------------------------------------
+
+def _show_config():
+    """Print a human-readable configuration summary."""
+    raw = load_json_raw_config()
+
+    school = raw.get("school", "jxnu")
+    enabled = raw.get("enabled", "0") == "1"
+    interval = raw.get("interval", "60")
+
+    print("=== JXNU SRun Configuration ===\n")
+    print("School:    %s" % school)
+    print("Enabled:   %s" % ("yes" if enabled else "no"))
+    print("Interval:  %ss" % interval)
+
+    _print_account_table(raw)
+    _print_hotspot_table(raw)
+
+    quiet_on = raw.get("quiet_hours_enabled", "0") == "1"
+    print("\n--- Quiet Hours ---")
+    if quiet_on:
+        print("  Enabled:      yes (%s - %s)" % (
+            raw.get("quiet_start", "23:00"), raw.get("quiet_end", "06:30")))
+        force = raw.get("force_logout_in_quiet", "0") == "1"
+        print("  Force logout: %s" % ("yes" if force else "no"))
+    else:
+        print("  Enabled:      no")
+
+    backoff_on = raw.get("backoff_enable", "0") == "1"
+    failover_on = raw.get("failover_enabled", "0") == "1"
+    print("\n--- Advanced ---")
+    if backoff_on:
+        print("  Backoff:    on (max_retries=%s, initial=%ss, max=%ss)" % (
+            raw.get("backoff_max_retries", "0"),
+            raw.get("backoff_initial_duration", "10"),
+            raw.get("backoff_max_duration", "300"),
+        ))
+    else:
+        print("  Backoff:    off")
+    if failover_on:
+        failback = raw.get("hotspot_failback_enabled", "0") == "1"
+        print("  Failover:   on (failback=%s, timeout=%ss)" % (
+            "on" if failback else "off",
+            raw.get("switch_ready_timeout_seconds", "30"),
+        ))
+    else:
+        print("  Failover:   off")
+    print("  Conn check: %s" % raw.get("connectivity_check_mode", "internet"))
+
+
+def _print_account_table(raw):
+    accounts = raw.get("campus_accounts", [])
+    default_campus = str(raw.get("default_campus_id", "")).strip()
+    print("\n--- Campus Accounts ---")
+    if not accounts:
+        print("  (none)")
+        return
+    # Header
+    print("  %-12s %-20s %-16s %-6s %-6s %-14s" % ("ID", "Label", "User", "Op", "Mode", "SSID"))
+    print("  " + "-" * 76)
+    for acc in accounts:
+        aid = str(acc.get("id", ""))
+        is_default = aid == default_campus
+        user_id = acc.get("user_id", "")
+        op = acc.get("operator", "")
+        mode = "wired" if acc.get("access_mode") == "wired" else "wifi"
+        label = acc.get("label", "") or ("%s@%s" % (user_id, op) if op else user_id)
+        ssid = acc.get("ssid", "") if mode != "wired" else "-"
+        marker = " *" if is_default else ""
+        print("  %-12s %-20s %-16s %-6s %-6s %-14s%s" % (
+            aid, label[:20], user_id[:16], op, mode, ssid[:14], marker))
+    print("  (* = default)")
+
+
+def _print_hotspot_table(raw):
+    hotspots = raw.get("hotspot_profiles", [])
+    default_hp = str(raw.get("default_hotspot_id", "")).strip()
+    print("\n--- Hotspot Profiles ---")
+    if not hotspots:
+        print("  (none)")
+        return
+    print("  %-12s %-20s %-20s %-10s" % ("ID", "Label", "SSID", "Encryption"))
+    print("  " + "-" * 64)
+    for hp in hotspots:
+        hid = str(hp.get("id", ""))
+        is_default = hid == default_hp
+        label = hp.get("label", "") or hp.get("ssid", "") or "(unnamed)"
+        ssid = hp.get("ssid", "")
+        enc = hp.get("encryption", "none")
+        marker = " *" if is_default else ""
+        print("  %-12s %-20s %-20s %-10s%s" % (
+            hid, label[:20], ssid[:20], enc, marker))
+    print("  (* = default)")
+
+
+# ---------------------------------------------------------------------------
+# CLI: config get / config set
+# ---------------------------------------------------------------------------
+
+def _config_get(key):
+    from config import GLOBAL_SCALAR_KEYS
+    raw = load_json_raw_config()
+    if key not in GLOBAL_SCALAR_KEYS:
+        print("未知配置项: %s" % key)
+        print("可用: %s" % ", ".join(sorted(GLOBAL_SCALAR_KEYS)))
+        return
+    print(raw.get(key, ""))
+
+
+def _config_set(pairs, json_file=None):
+    """Set config values from KEY=VALUE pairs or import from a JSON file."""
+    import json as _json
+    from config import save_json_raw_config, GLOBAL_SCALAR_KEYS
+
+    raw = load_json_raw_config()
+
+    if json_file:
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                imported = _json.load(f)
+        except Exception as exc:
+            print("无法读取 JSON 文件: %s" % exc)
+            return
+        if not isinstance(imported, dict):
+            print("JSON 文件内容必须是对象")
+            return
+        raw.update(imported)
+        save_json_raw_config(raw)
+        print("已从 %s 导入配置（%d 个字段）" % (json_file, len(imported)))
+        return
+
+    if not pairs:
+        print("用法: srunnet config set KEY=VALUE ...")
+        return
+
+    changed = []
+    for pair in pairs:
+        if "=" not in pair:
+            print("格式错误（需 KEY=VALUE）: %s" % pair)
+            return
+        key, val = pair.split("=", 1)
+        key = key.strip()
+        if key not in GLOBAL_SCALAR_KEYS:
+            print("未知配置项: %s" % key)
+            print("可用: %s" % ", ".join(sorted(GLOBAL_SCALAR_KEYS)))
+            return
+        old = raw.get(key, "")
+        raw[key] = val
+        changed.append((key, old, val))
+
+    save_json_raw_config(raw)
+    for key, old, val in changed:
+        print("  %s: %s -> %s" % (key, old or "(empty)", val))
+    print("配置已保存。重启生效: /etc/init.d/jxnu_srun restart")
+
+
+# ---------------------------------------------------------------------------
+# CLI: config account / config hotspot CRUD
+# ---------------------------------------------------------------------------
+
+OPERATOR_LABELS = {"cmcc": "移动", "ctcc": "电信", "cucc": "联通", "xn": "校内网"}
+ENC_LABELS = {
+    "none": "Open", "psk": "WPA-PSK", "psk2": "WPA2-PSK",
+    "psk-mixed": "WPA/WPA2", "sae": "WPA3-SAE", "sae-mixed": "WPA2/WPA3",
+}
+
+
+def _prompt(label, default="", choices=None, password=False):
+    """Interactive prompt with optional default and choices."""
+    suffix = ""
+    if choices:
+        suffix = " [%s]" % "/".join(choices)
+    if default:
+        suffix += " (%s)" % default
+    suffix += ": "
+
+    if password:
+        try:
+            import getpass
+            value = getpass.getpass(label + suffix)
+        except (ImportError, EOFError):
+            value = input(label + suffix)
+    else:
+        try:
+            value = input(label + suffix)
+        except EOFError:
+            value = ""
+
+    value = value.strip()
+    if not value and default:
+        return default
+    if choices and value and value not in choices:
+        print("  无效选项: %s，使用默认值: %s" % (value, default))
+        return default
+    return value
+
+
+def _interactive_campus(existing=None):
+    """Interactive prompts for campus account fields. Returns dict."""
+    item = existing or {}
+    fields = {}
+    fields["label"] = _prompt("标签（选填）", item.get("label", ""))
+    fields["user_id"] = _prompt("学工号", item.get("user_id", ""))
+    if not fields["user_id"]:
+        print("学工号不能为空")
+        return None
+    fields["operator"] = _prompt("运营商", item.get("operator", "cucc"),
+                                  choices=["cmcc", "ctcc", "cucc", "xn"])
+    fields["password"] = _prompt("密码", item.get("password", ""), password=True)
+    fields["access_mode"] = _prompt("接入方式", item.get("access_mode", "wifi"),
+                                     choices=["wifi", "wired"])
+    fields["base_url"] = _prompt("认证地址", item.get("base_url", "http://172.17.1.2"))
+    fields["ac_id"] = _prompt("AC_ID", item.get("ac_id", "1"))
+    if fields["access_mode"] != "wired":
+        fields["ssid"] = _prompt("校园网 SSID", item.get("ssid", "jxnu_stu"))
+        fields["bssid"] = _prompt("BSSID（留空不锁定）", item.get("bssid", ""))
+        fields["radio"] = _prompt("频段（留空自动）", item.get("radio", ""))
+    else:
+        fields["ssid"] = item.get("ssid", "jxnu_stu")
+        fields["bssid"] = item.get("bssid", "")
+        fields["radio"] = item.get("radio", "")
+
+    if not fields["label"]:
+        if fields["operator"] != "xn" and fields["operator"]:
+            fields["label"] = "%s@%s" % (fields["user_id"], fields["operator"])
+        else:
+            fields["label"] = fields["user_id"]
+    return fields
+
+
+def _interactive_hotspot(existing=None):
+    """Interactive prompts for hotspot profile fields. Returns dict."""
+    item = existing or {}
+    fields = {}
+    fields["label"] = _prompt("标签（选填）", item.get("label", ""))
+    fields["ssid"] = _prompt("SSID", item.get("ssid", ""))
+    if not fields["ssid"]:
+        print("SSID 不能为空")
+        return None
+    fields["encryption"] = _prompt("加密方式", item.get("encryption", "psk2"),
+                                    choices=["none", "psk", "psk2", "psk-mixed", "sae", "sae-mixed"])
+    if fields["encryption"] != "none":
+        fields["key"] = _prompt("密码", item.get("key", ""), password=True)
+    else:
+        fields["key"] = ""
+    fields["radio"] = _prompt("频段（留空自动）", item.get("radio", ""))
+
+    if not fields["label"]:
+        fields["label"] = fields["ssid"]
+    return fields
+
+
+def _config_account(args):
+    from config import save_json_raw_config, _next_id, _find_item_by_id
+
+    raw = load_json_raw_config()
+    accounts = raw.get("campus_accounts", [])
+    if not isinstance(accounts, list):
+        accounts = []
+
+    subcmd = args.account_command
+
+    if not subcmd:
+        _print_account_table(raw)
+        return
+
+    if subcmd == "add":
+        fields = _interactive_campus()
+        if not fields:
+            return
+        new_id = _next_id(accounts, "campus")
+        fields["id"] = new_id
+        accounts.append(fields)
+        raw["campus_accounts"] = accounts
+        if not raw.get("default_campus_id"):
+            raw["default_campus_id"] = new_id
+            raw["active_campus_id"] = new_id
+        save_json_raw_config(raw)
+        print("\n已添加: %s (%s)" % (new_id, fields.get("label", "")))
+        return
+
+    if subcmd == "edit":
+        item = _find_item_by_id(accounts, args.id)
+        if not item:
+            print("未找到账号: %s" % args.id)
+            return
+        fields = _interactive_campus(existing=item)
+        if not fields:
+            return
+        fields["id"] = args.id
+        for i, acc in enumerate(accounts):
+            if str(acc.get("id", "")) == args.id:
+                accounts[i] = fields
+                break
+        raw["campus_accounts"] = accounts
+        save_json_raw_config(raw)
+        print("\n已更新: %s (%s)" % (args.id, fields.get("label", "")))
+        return
+
+    if subcmd == "rm":
+        found = _find_item_by_id(accounts, args.id)
+        if not found:
+            print("未找到账号: %s" % args.id)
+            return
+        accounts = [a for a in accounts if str(a.get("id", "")) != args.id]
+        raw["campus_accounts"] = accounts
+        if raw.get("default_campus_id") == args.id:
+            raw["default_campus_id"] = accounts[0]["id"] if accounts else ""
+        if raw.get("active_campus_id") == args.id:
+            raw["active_campus_id"] = raw.get("default_campus_id", "")
+        save_json_raw_config(raw)
+        print("已删除: %s" % args.id)
+        return
+
+    if subcmd == "default":
+        found = _find_item_by_id(accounts, args.id)
+        if not found:
+            print("未找到账号: %s" % args.id)
+            return
+        raw["default_campus_id"] = args.id
+        save_json_raw_config(raw)
+        print("已设为默认: %s (%s)" % (args.id, found.get("label", "")))
+        return
+
+
+def _config_hotspot(args):
+    from config import save_json_raw_config, _next_id, _find_item_by_id
+
+    raw = load_json_raw_config()
+    hotspots = raw.get("hotspot_profiles", [])
+    if not isinstance(hotspots, list):
+        hotspots = []
+
+    subcmd = args.hotspot_command
+
+    if not subcmd:
+        _print_hotspot_table(raw)
+        return
+
+    if subcmd == "add":
+        fields = _interactive_hotspot()
+        if not fields:
+            return
+        new_id = _next_id(hotspots, "hotspot")
+        fields["id"] = new_id
+        hotspots.append(fields)
+        raw["hotspot_profiles"] = hotspots
+        if not raw.get("default_hotspot_id"):
+            raw["default_hotspot_id"] = new_id
+            raw["active_hotspot_id"] = new_id
+        save_json_raw_config(raw)
+        print("\n已添加: %s (%s)" % (new_id, fields.get("label", "")))
+        return
+
+    if subcmd == "edit":
+        item = _find_item_by_id(hotspots, args.id)
+        if not item:
+            print("未找到热点配置: %s" % args.id)
+            return
+        fields = _interactive_hotspot(existing=item)
+        if not fields:
+            return
+        fields["id"] = args.id
+        for i, hp in enumerate(hotspots):
+            if str(hp.get("id", "")) == args.id:
+                hotspots[i] = fields
+                break
+        raw["hotspot_profiles"] = hotspots
+        save_json_raw_config(raw)
+        print("\n已更新: %s (%s)" % (args.id, fields.get("label", "")))
+        return
+
+    if subcmd == "rm":
+        found = _find_item_by_id(hotspots, args.id)
+        if not found:
+            print("未找到热点配置: %s" % args.id)
+            return
+        hotspots = [h for h in hotspots if str(h.get("id", "")) != args.id]
+        raw["hotspot_profiles"] = hotspots
+        if raw.get("default_hotspot_id") == args.id:
+            raw["default_hotspot_id"] = hotspots[0]["id"] if hotspots else ""
+        if raw.get("active_hotspot_id") == args.id:
+            raw["active_hotspot_id"] = raw.get("default_hotspot_id", "")
+        save_json_raw_config(raw)
+        print("已删除: %s" % args.id)
+        return
+
+    if subcmd == "default":
+        found = _find_item_by_id(hotspots, args.id)
+        if not found:
+            print("未找到热点配置: %s" % args.id)
+            return
+        raw["default_hotspot_id"] = args.id
+        save_json_raw_config(raw)
+        print("已设为默认: %s (%s)" % (args.id, found.get("label", "")))
+        return
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (subcommand style)
 # ---------------------------------------------------------------------------
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="JXNU SRun client for OpenWrt")
-    parser.add_argument("--daemon", action="store_true", help="run as daemon loop")
-    parser.add_argument("--once", action="store_true", help="run login once")
-    parser.add_argument("--logout", action="store_true", help="logout current account")
-    parser.add_argument("--relogin", action="store_true", help="logout then login once")
-    parser.add_argument("--status", action="store_true", help="query online status")
-    parser.add_argument(
-        "--switch-hotspot", action="store_true", help="switch STA profile to hotspot"
+    parser = argparse.ArgumentParser(
+        prog="srunnet",
+        description="JXNU SRun campus network client for OpenWrt",
     )
-    parser.add_argument(
-        "--switch-campus", action="store_true", help="switch STA profile to campus"
-    )
-    parser.add_argument(
-        "--list-schools", action="store_true", help="list available school profiles"
-    )
+    sub = parser.add_subparsers(dest="command")
+
+    # --- top-level commands ---
+    sub.add_parser("status", help="show current status")
+    sub.add_parser("login", help="login once")
+    sub.add_parser("logout", help="logout current account")
+    sub.add_parser("relogin", help="logout then login")
+    sub.add_parser("daemon", help="run as daemon (used by init script)")
+    sub.add_parser("enable", help="enable the daemon service")
+    sub.add_parser("disable", help="disable the daemon service")
+    sub.add_parser("schools", help="list available school profiles (JSON)")
+
+    p_log = sub.add_parser("log", help="tail the daemon log")
+    p_log.add_argument("-n", type=int, default=0,
+                       help="show last N lines then exit (default: follow)")
+
+    p_switch = sub.add_parser("switch", help="switch network mode")
+    p_switch.add_argument("target", choices=["hotspot", "campus"],
+                          help="switch to hotspot or campus")
+
+    # --- config subcommand tree ---
+    p_config = sub.add_parser("config", help="view or modify configuration")
+    config_sub = p_config.add_subparsers(dest="config_command")
+
+    config_sub.add_parser("show", help="show full configuration summary")
+
+    p_get = config_sub.add_parser("get", help="get a scalar config value")
+    p_get.add_argument("key", help="config key name")
+
+    p_set = config_sub.add_parser("set", help="set config values or import JSON")
+    p_set.add_argument("pairs", nargs="*", metavar="KEY=VALUE",
+                       help="scalar config values to set")
+    p_set.add_argument("-f", "--file", metavar="PATH",
+                       help="import config from a JSON file")
+
+    # config account
+    p_account = config_sub.add_parser("account", help="manage campus accounts")
+    account_sub = p_account.add_subparsers(dest="account_command")
+    account_sub.add_parser("add", help="add a campus account (interactive)")
+    p_acc_edit = account_sub.add_parser("edit", help="edit a campus account")
+    p_acc_edit.add_argument("id", help="account ID (e.g. campus-1)")
+    p_acc_rm = account_sub.add_parser("rm", help="remove a campus account")
+    p_acc_rm.add_argument("id", help="account ID")
+    p_acc_def = account_sub.add_parser("default", help="set default campus account")
+    p_acc_def.add_argument("id", help="account ID")
+
+    # config hotspot
+    p_hotspot = config_sub.add_parser("hotspot", help="manage hotspot profiles")
+    hotspot_sub = p_hotspot.add_subparsers(dest="hotspot_command")
+    hotspot_sub.add_parser("add", help="add a hotspot profile (interactive)")
+    p_hp_edit = hotspot_sub.add_parser("edit", help="edit a hotspot profile")
+    p_hp_edit.add_argument("id", help="hotspot ID (e.g. hotspot-1)")
+    p_hp_rm = hotspot_sub.add_parser("rm", help="remove a hotspot profile")
+    p_hp_rm.add_argument("id", help="hotspot ID")
+    p_hp_def = hotspot_sub.add_parser("default", help="set default hotspot profile")
+    p_hp_def.add_argument("id", help="hotspot ID")
+
     args = parser.parse_args()
 
-    if args.list_schools:
-        import json as _json
-        import schools
-        print(_json.dumps(schools.list_schools(), ensure_ascii=False, indent=2))
+    # No command → show status
+    if not args.command:
+        cfg = load_config()
+        _show_status(cfg)
         return
 
-    cfg = load_config()
-
-    if args.daemon:
-        run_daemon()
+    # --- dispatch ---
+    if args.command == "status":
+        cfg = load_config()
+        _show_status(cfg)
         return
 
-    if args.switch_hotspot and args.switch_campus:
-        print("参数错误：不能同时指定 --switch-hotspot 和 --switch-campus")
-        return
-
-    selected = sum(
-        1
-        for flag in [
-            args.once,
-            args.logout,
-            args.relogin,
-            args.status,
-            args.switch_hotspot,
-            args.switch_campus,
-        ]
-        if flag
-    )
-    if selected > 1:
-        print("参数错误：一次只能执行一种操作")
-        return
-
-    if args.switch_hotspot:
-        _, message = run_switch(cfg, expect_hotspot=True)
-        append_log("[JXNU-SRun] 手动切换热点结果: " + message)
-        print(message)
-        return
-
-    if args.switch_campus:
-        _, message = run_switch(cfg, expect_hotspot=False)
-        append_log("[JXNU-SRun] 手动切换校园网结果: " + message)
-        print(message)
-        return
-
-    if args.logout:
-        ok, message = orchestrator.run_manual_logout(cfg)
-        append_log("[JXNU-SRun] 手动登出结果: " + message)
-        print(message)
-        return
-
-    if args.relogin:
-        ok, message = orchestrator.run_manual_login(cfg)
-        append_log("[JXNU-SRun] 手动重新登录结果: " + message)
-        print(message)
-        return
-
-    if args.status:
-        ok, message = orchestrator.run_status(cfg)
-        print(message)
-        return
-
-    if args.once:
+    if args.command == "login":
         from config import (
             apply_default_selection_for_runtime,
             in_quiet_window,
@@ -466,16 +966,85 @@ def main():
             print("夜间停用中（北京时间 %s），不执行登录" % quiet_window_label(cfg))
             return
         if not cfg["username"] or not cfg["password"]:
-            print("请先在 LuCI 页面填写学工号和密码")
+            print("请先配置学工号和密码: srunnet config account add")
             return
         ok_prep, msg_prep = orchestrator.prepare_campus_for_login(cfg)
         if not ok_prep:
             print(msg_prep)
             return
         ok, message = srun_auth.run_once(cfg)
-        append_log("[JXNU-SRun] 单次登录结果: " + message)
+        log("INFO", "action_result", "login: " + message, action="login")
         print(message)
         return
 
-    # 无参数：显示帮助
-    parser.print_help()
+    if args.command == "logout":
+        cfg = load_config()
+        ok, message = orchestrator.run_manual_logout(cfg)
+        log("INFO", "action_result", "logout: " + message, action="logout")
+        print(message)
+        return
+
+    if args.command == "relogin":
+        cfg = load_config()
+        ok, message = orchestrator.run_manual_login(cfg)
+        log("INFO", "action_result", "relogin: " + message, action="relogin")
+        print(message)
+        return
+
+    if args.command == "daemon":
+        run_daemon()
+        return
+
+    if args.command == "log":
+        _tail_log(args.n)
+        return
+
+    if args.command == "enable":
+        _config_set(["enabled=1"])
+        return
+
+    if args.command == "disable":
+        _config_set(["enabled=0"])
+        return
+
+    if args.command == "schools":
+        import json as _json
+        import schools
+        print(_json.dumps(schools.list_schools(), ensure_ascii=False, indent=2))
+        return
+
+    if args.command == "switch":
+        cfg = load_config()
+        expect_hotspot = args.target == "hotspot"
+        _, message = run_switch(cfg, expect_hotspot=expect_hotspot)
+        log("INFO", "action_result", "switch %s: %s" % (args.target, message),
+            action="switch_%s" % args.target)
+        print(message)
+        return
+
+    if args.command == "config":
+        cmd = args.config_command
+
+        if not cmd or cmd == "show":
+            _show_config()
+            return
+
+        if cmd == "get":
+            _config_get(args.key)
+            return
+
+        if cmd == "set":
+            _config_set(args.pairs, json_file=args.file)
+            return
+
+        if cmd == "account":
+            _config_account(args)
+            return
+
+        if cmd == "hotspot":
+            _config_hotspot(args)
+            return
+
+        # Shouldn't reach here
+        parser.parse_args(["config", "--help"])
+        return

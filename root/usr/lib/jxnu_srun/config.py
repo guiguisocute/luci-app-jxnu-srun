@@ -224,11 +224,38 @@ def save_json_raw_config(raw_cfg):
 # 日志
 # ---------------------------------------------------------------------------
 
-def append_log(line):
-    timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    log_line = "[%s] %s" % (timestamp, str(line).strip())
-    print(log_line, flush=True)
+def log(level, event, msg="", **ctx):
+    """
+    Structured log entry.
 
+    level: "INFO" | "WARN" | "ERROR"
+    event: english snake_case event key (e.g. "login_success")
+    msg:   optional human-readable english summary
+    ctx:   key=value context pairs
+    """
+    timestamp = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    parts = [level, event]
+    for k, v in ctx.items():
+        sv = str(v)
+        if " " in sv or not sv:
+            sv = '"%s"' % sv.replace('"', '\\"')
+        parts.append("%s=%s" % (k, sv))
+    if msg:
+        parts.append("| %s" % msg)
+    _write_log("[%s] %s" % (timestamp, " ".join(parts)))
+
+
+def append_log(line):
+    """Legacy compat wrapper. New code should use log()."""
+    _write_log("[%s] %s" % (
+        datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        str(line).strip(),
+    ))
+
+
+def _write_log(log_line):
+    """Write a pre-formatted log line to stdout and log file with rotation."""
+    print(log_line, flush=True)
     try:
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_BYTES:
             with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as rf:
@@ -310,7 +337,7 @@ def reconcile_manual_login_service_guard():
 
     restored, previous_enabled = restore_manual_login_service_guard()
     if restored and previous_enabled == "1":
-        append_log("[JXNU-SRun] 检测到遗留的手动登录保护状态，已恢复自动服务开关。")
+        log("INFO", "config_legacy_fix", "restored manual login service guard", previous_enabled=previous_enabled)
     return restored
 
 
@@ -476,10 +503,10 @@ def apply_default_selection_for_runtime(expect_hotspot, reason=""):
     suffix = ""
     if reason:
         suffix = "（%s）" % str(reason).strip()
-    append_log(
-        "[JXNU-SRun] 已应用默认%s到运行态%s：%s -> %s。"
-        % (meta["label"], suffix, active_id or "未设置", default_id)
-    )
+    log("INFO", "config_default_applied",
+        "applied default %s to runtime" % meta["label"],
+        kind=meta["label"], old=active_id or "unset", new=default_id,
+        reason=str(reason or ""))
     return load_config(), True, default_id
 
 
@@ -644,7 +671,7 @@ def load_config():
         raw = _migrate_legacy_config(raw)
         try:
             save_json_raw_config(raw)
-            append_log("[JXNU-SRun] 旧版配置已自动迁移为新格式")
+            log("INFO", "config_migrated", "legacy config migrated to new format")
         except Exception:
             pass
 

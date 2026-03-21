@@ -10,6 +10,7 @@ import time
 
 from config import (
     append_log,
+    log,
     campus_uses_wired,
     failover_enabled,
     get_switch_ready_timeout_seconds,
@@ -862,9 +863,8 @@ def switch_sta_profile(cfg, expect_hotspot):
                 conn_hint = "网关不可达"
                 if portal_detail:
                     conn_hint = conn_hint + ": " + portal_detail
-            append_log(
-                "[JXNU-SRun] 校园网切换完成 (%s %s, %s)" % (radio or "?", bl, conn_hint)
-            )
+            log("INFO", "switch_campus_done", "campus switch complete",
+                radio=radio or "?", ssid=bl, portal=conn_hint)
             hint = "已切换为%s配置（%s %s, %s）" % (
                 target["label"],
                 radio or "?",
@@ -874,7 +874,8 @@ def switch_sta_profile(cfg, expect_hotspot):
             if select_msg:
                 hint = hint + "；" + select_msg
             return True, hint
-        append_log("[JXNU-SRun] 校园网切换后未获取到 IPv4 (%s %s)" % (radio or "?", bl))
+        log("WARN", "switch_campus_no_ip", "no IPv4 after campus switch",
+            radio=radio or "?", ssid=bl)
         return False, "已切换为%s配置但未获取到IPv4地址（%s %s）" % (
             target["label"],
             radio or "?",
@@ -888,7 +889,7 @@ def switch_sta_profile(cfg, expect_hotspot):
         dns_ok, _ = test_internet_connectivity()
         conn_hint = "连通" if dns_ok else "不通"
         if (not dns_ok) and hotspot_failback_enabled(cfg):
-            append_log("[JXNU-SRun] 热点切换后未确认互联网连通，开始自动回切校园网。")
+            log("INFO", "hotspot_failback", "hotspot no internet, rolling back to campus")
             rollback_ok, rollback_msg = switch_to_campus(cfg)
             if rollback_ok:
                 return False, "热点未确认连通，已自动回切校园网：%s" % (
@@ -908,7 +909,7 @@ def switch_sta_profile(cfg, expect_hotspot):
         return True, hint
 
     if hotspot_failback_enabled(cfg):
-        append_log("[JXNU-SRun] 热点切换后未获取到 IPv4，开始自动回切校园网。")
+        log("WARN", "hotspot_failback", "hotspot no IPv4, rolling back to campus")
         rollback_ok, rollback_msg = switch_to_campus(cfg)
         if rollback_ok:
             return False, "热点未获取到 IPv4，已自动回切校园网：%s" % (

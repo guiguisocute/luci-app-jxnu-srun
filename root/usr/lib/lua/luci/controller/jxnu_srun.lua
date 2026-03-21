@@ -439,9 +439,102 @@ function action_enqueue()
     http.write(jsonc.stringify({ ok = ok, message = message, action = action, ts = os.time() }))
 end
 
+-- Structured log translation table (event -> Chinese)
+local event_zh = {
+    login_success       = "登录成功",
+    login_failed        = "登录失败",
+    retry_scheduled     = "即将重试",
+    retry_success       = "重试成功",
+    retry_failed        = "重试失败",
+    retry_stopped       = "停止重试",
+    disconnect_detected = "检测到断线",
+    status_check_error  = "状态检测异常",
+    logout_request      = "正在登出",
+    logout_success      = "登出成功",
+    logout_failed       = "登出失败",
+    logout_verify_failed = "登出校验失败",
+    manual_login_start  = "开始手动登录",
+    manual_login_success = "手动登录成功",
+    manual_login_failed = "手动登录失败",
+    manual_preclean     = "登录预清理",
+    manual_preclean_done = "预清理完成",
+    action_result       = "操作结果",
+    action_unknown      = "未知操作",
+    quiet_enter         = "进入夜间停用",
+    quiet_exit          = "退出夜间停用",
+    daemon_tick         = "状态更新",
+    daemon_start        = "守护进程启动",
+    daemon_stop         = "守护进程停止",
+    switch_campus_done  = "已切换到校园网",
+    switch_campus_no_ip = "校园网切换未获取IP",
+    switch_hotspot_done = "已切换到热点",
+    switch_hotspot_no_ip = "热点未获取IP",
+    hotspot_failback    = "热点回退",
+    config_migrated     = "配置已迁移",
+    config_legacy_fix   = "修复遗留状态",
+    config_default_applied = "应用默认配置",
+    config_action_queued = "操作已入队",
+    status_query        = "状态查询",
+}
+
+-- Error reason translation (reuses server-side mapping)
+local reason_zh = {
+    username_or_password_error = "用户名或密码错误",
+    ip_already_online_error    = "IP已在线",
+    challenge_expire_error     = "挑战码已过期",
+    sign_error                 = "签名错误",
+    radius_error               = "RADIUS认证失败",
+    login_error                = "认证失败",
+}
+
+-- Parse structured log line: "[ts] LEVEL EVENT k=v ... | msg"
+local function parse_structured(line)
+    local ts, rest = line:match("^(%[.-%]) (.+)$")
+    if not rest then return nil end
+    local level, event = rest:match("^(%u+) ([%w_]+)")
+    if not level or not event then return nil end
+    return ts, level, event, rest
+end
+
+-- Translate a structured log line to user-friendly Chinese
+local function friendly_line(line)
+    local ts, level, event, rest = parse_structured(line)
+    if not ts then return line end
+    local zh = event_zh[event]
+    if not zh then return line end
+
+    local parts = { ts, " " }
+    if level == "ERROR" then
+        parts[#parts + 1] = "[错误] "
+    elseif level == "WARN" then
+        parts[#parts + 1] = "[警告] "
+    end
+    parts[#parts + 1] = zh
+
+    local account = rest:match("account=(%S+)")
+    if account then parts[#parts + 1] = " [" .. account .. "]" end
+
+    local reason = rest:match("reason=(%S+)")
+    if reason then
+        local rzh = reason_zh[reason]
+        parts[#parts + 1] = ": " .. (rzh or reason)
+    end
+
+    local attempt = rest:match("attempt=(%d+)")
+    if attempt then parts[#parts + 1] = " (第" .. attempt .. "次)" end
+
+    local detail = rest:match("|%s*(.+)$")
+    if detail and not reason and not account then
+        parts[#parts + 1] = ": " .. detail
+    end
+
+    return table.concat(parts)
+end
+
 function action_log_tail()
     local since = tonumber(http.formvalue("since")) or 0
     local lines = tonumber(http.formvalue("lines")) or 400
+    local fmt = http.formvalue("format") or "raw"
     if lines < 10 then
         lines = 10
     elseif lines > 1000 then
@@ -465,6 +558,15 @@ function action_log_tail()
         end
         text = table.concat(kept, "\n")
     end
+
+    if fmt == "friendly" and text ~= "" then
+        local translated = {}
+        for line in text:gmatch("[^\n]+") do
+            translated[#translated + 1] = friendly_line(line)
+        end
+        text = table.concat(translated, "\n")
+    end
+
     if text == "" then
         text = "No logs yet."
     end

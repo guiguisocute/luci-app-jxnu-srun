@@ -8,7 +8,7 @@ from _base import SchoolProfile
 class Profile(SchoolProfile):
     NAME = "默认配置"
     SHORT_NAME = "jxnu"
-    DESCRIPTION = "该配置在以下学校以得到验证：江西师范大学（瑶湖/青山湖校区）"
+    DESCRIPTION = "该配置在以下学校以得到验证：江西师范大学（瑶湖/青山湖校区），如果该配置无法再您的学校使用，请直接前往仓库提交 Issue 或 PR"
     CONTRIBUTORS = ("@matthewlu070111", "@guiguisocute")
 
     ALPHA = "LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA"

@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .claude/
 .spec-workflow/
+docs/
+scripts/
+tests/
 AGENTS.md
 CLAUDE.md
 PLAN.md

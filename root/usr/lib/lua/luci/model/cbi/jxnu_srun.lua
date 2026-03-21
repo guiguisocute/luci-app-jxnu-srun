@@ -277,7 +277,7 @@ local changed = false
 
 -- 加载学校 Profile 列表
 local schools_json = util.trim(sys.exec(
-    find_python() .. " -B /usr/lib/jxnu_srun/client.py --list-schools 2>/dev/null"
+    find_python() .. " -B /usr/lib/jxnu_srun/client.py schools 2>/dev/null"
 ) or "")
 local schools = jsonc.parse(schools_json)
 if type(schools) ~= "table" then schools = {} end
@@ -463,13 +463,10 @@ function school_info.cfgvalue()
     local js_data = jsonc.stringify(schools) or "[]"
 
     return string.format([[
-<div id="jxnu-school-info"
-     style="margin:-8px 0 12px 0;padding:8px 14px;
-            color:#166534;font-size:13px;line-height:1.7;
-            border-left:3px solid #16a34a;background:rgba(22,163,52,.06);
-            border-radius:0 4px 4px 0;display:%s;">
-  <div id="jxnu-school-desc">%s</div>
-  <div id="jxnu-school-contrib" style="margin-top:2px;">%s</div>
+<div id="jxnu-school-info" class="cbi-value-description"
+     style="color:#16a34a;font-weight:700;display:%s;">
+  <span id="jxnu-school-desc">%s</span>
+  <span id="jxnu-school-contrib" style="margin-left:8px;">%s</span>
 </div>
 <script type="text/javascript">
 (function() {
@@ -670,7 +667,7 @@ function manual_login.cfgvalue()
         showForceStopButton();
       }
 
-      fetchJson('/cgi-bin/luci/admin/services/jxnu_srun/log_tail?lines=200&since=' + encodeURIComponent(requestedAt) + '&_=' + Date.now(), function(err, logData) {
+      fetchJson('/cgi-bin/luci/admin/services/jxnu_srun/log_tail?lines=200&format=friendly&since=' + encodeURIComponent(requestedAt) + '&_=' + Date.now(), function(err, logData) {
         if (!err && logData && typeof logData.log === 'string') {
           logBox.textContent = logData.log;
           logBox.scrollTop = logBox.scrollHeight;
@@ -1295,7 +1292,7 @@ function log_text.cfgvalue(self, section)
   }
   function refresh() {
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', '/cgi-bin/luci/admin/services/jxnu_srun/log_tail?lines=80&_=' + Date.now(), true);
+    xhr.open('GET', '/cgi-bin/luci/admin/services/jxnu_srun/log_tail?lines=80&format=friendly&_=' + Date.now(), true);
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4 || xhr.status !== 200) return;
       try {
