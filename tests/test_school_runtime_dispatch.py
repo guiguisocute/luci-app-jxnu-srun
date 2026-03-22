@@ -117,6 +117,59 @@ class SchoolRuntimeDispatchTests(unittest.TestCase):
         self.assertEqual((ok, message), (True, "runtime-login"))
         self.assertIn(("login_once", self.cfg["username"]), self.runtime.calls)
 
+    def test_run_once_safe_preserves_readable_error_when_runtime_build_fails(self):
+        with mock.patch.object(
+            srun_auth,
+            "build_app_context",
+            side_effect=RuntimeError("runtime init exploded"),
+            create=True,
+        ):
+            ok, message = srun_auth.run_once_safe(dict(self.cfg))
+
+        self.assertFalse(ok)
+        self.assertEqual(message, "错误: runtime init exploded")
+
+    def test_partial_runtime_inherits_default_boundary_methods(self):
+        class PartialRuntime(object):
+            def __init__(self):
+                self.calls = []
+
+            def build_urls(self, base_url):
+                return {
+                    "init_url": base_url,
+                    "get_challenge_api": base_url + "/cgi-bin/get_challenge",
+                    "srun_portal_api": base_url + "/cgi-bin/srun_portal",
+                    "rad_user_info_api": base_url + "/cgi-bin/rad_user_info",
+                    "rad_user_dm_api": base_url + "/cgi-bin/rad_user_dm",
+                }
+
+            def query_online_status(
+                self, app_ctx, expected_username=None, bind_ip=None
+            ):
+                self.calls.append(("query_online_status", expected_username, bind_ip))
+                return True, "partial-runtime-status"
+
+        runtime = school_runtime._finalize_runtime(
+            PartialRuntime(),
+            {"short_name": "partial", "name": "Partial", "description": ""},
+            "build_runtime",
+            "partial_runtime.py",
+        )
+        app_ctx = {
+            "cfg": dict(self.cfg),
+            "runtime": runtime,
+            "core_api": school_runtime.build_core_api(),
+            "runtime_api_version": school_runtime.RUNTIME_API_VERSION,
+            "school_metadata": {"short_name": "partial"},
+        }
+
+        online, message = runtime.status(app_ctx)
+
+        self.assertEqual((online, message), (True, "partial-runtime-status"))
+        self.assertIn(
+            ("query_online_status", self.cfg["username"], None), runtime.calls
+        )
+
     def test_logout_once_uses_runtime_override(self):
         with (
             mock.patch.object(

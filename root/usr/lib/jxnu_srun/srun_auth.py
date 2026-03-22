@@ -255,8 +255,8 @@ def run_once(cfg):
 
 
 def run_once_safe(cfg):
-    app_ctx = ensure_app_context(cfg)
     try:
+        app_ctx = ensure_app_context(cfg)
         return run_once(app_ctx)
     except HTTP_EXCEPTIONS as exc:
         return False, "网络错误: " + localize_error(exc)

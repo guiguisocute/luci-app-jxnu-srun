@@ -193,7 +193,9 @@ def default_run_status(app_ctx):
     if not cfg["username"]:
         return False, "未配置学工号" + mode_hint
 
-    online, message = app_ctx["runtime"].query_online_status(app_ctx)
+    online, message = app_ctx["runtime"].query_online_status(
+        app_ctx, expected_username=cfg["username"]
+    )
     return online, localize_error(message) + mode_hint
 
 

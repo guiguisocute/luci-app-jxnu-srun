@@ -3,6 +3,7 @@ School runtime loader and compatibility adapters.
 """
 
 import inspect
+import types
 
 import crypto
 import schools
@@ -81,6 +82,25 @@ class LegacyProfileRuntimeAdapter(object):
         return app_ctx["core_api"]["default_run_quiet_logout"](app_ctx)
 
 
+_BOUNDARY_METHODS = (
+    "login_once",
+    "logout_once",
+    "query_online_identity",
+    "query_online_status",
+    "status",
+    "quiet_logout",
+)
+
+
+def _attach_default_boundary_methods(runtime):
+    for name in _BOUNDARY_METHODS:
+        if callable(getattr(runtime, name, None)):
+            continue
+        method = getattr(LegacyProfileRuntimeAdapter, name)
+        setattr(runtime, name, types.MethodType(method, runtime))
+    return runtime
+
+
 class DefaultRuntime(LegacyProfileRuntimeAdapter):
     def __init__(self):
         profile = SchoolProfile()
@@ -104,6 +124,7 @@ def _get_runtime_metadata(short_name):
 
 def _finalize_runtime(runtime, metadata, runtime_type, source_file):
     _apply_legacy_profile_metadata(runtime, metadata)
+    _attach_default_boundary_methods(runtime)
     runtime.runtime_type = getattr(runtime, "runtime_type", runtime_type)
     runtime.runtime_api_version = getattr(
         runtime, "runtime_api_version", RUNTIME_API_VERSION
