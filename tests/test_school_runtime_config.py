@@ -27,6 +27,13 @@ class SchoolRuntimeConfigTests(unittest.TestCase):
         config.JSON_CONFIG_FILE = self.original_json_config_file
         shutil.rmtree(self.tmp_dir)
 
+    def _school_metadata(self, descriptors=None, no_suffix_operators=None):
+        return {
+            "short_name": "runtime-school",
+            "no_suffix_operators": list(no_suffix_operators or ["xn"]),
+            "school_extra": list(descriptors or []),
+        }
+
     def test_save_and_load_school_extra_contract(self):
         descriptors = [
             {
@@ -53,9 +60,13 @@ class SchoolRuntimeConfigTests(unittest.TestCase):
         self.assertEqual({"domain": "override.example"}, normalized)
 
         raw_cfg["school_extra"] = normalized
-        config.save_json_raw_config(raw_cfg)
+        with mock.patch(
+            "schools.get_school_metadata",
+            return_value=self._school_metadata(descriptors=descriptors),
+        ):
+            config.save_json_raw_config(raw_cfg)
+            persisted = config.load_json_raw_config()
 
-        persisted = config.load_json_raw_config()
         self.assertEqual({"domain": "override.example"}, persisted.get("school_extra"))
         self.assertEqual(
             {"domain": "override.example"}, config.load_school_extra(persisted)
@@ -108,6 +119,137 @@ class SchoolRuntimeConfigTests(unittest.TestCase):
         self.assertEqual({}, config.load_school_extra({"school_extra": ["bad"]}))
         self.assertEqual({}, config.normalize_school_extra(raw_cfg, descriptors))
 
+    def test_school_extra_falsey_json_values_are_preserved(self):
+        descriptors = [
+            {
+                "key": "retry_count",
+                "type": "int",
+                "default": 3,
+                "required": True,
+                "label": "Retry count",
+                "description": "Retry count",
+                "choices": [],
+                "secret": False,
+            },
+            {
+                "key": "timeout_ratio",
+                "type": "float",
+                "default": 1.0,
+                "required": True,
+                "label": "Timeout ratio",
+                "description": "Timeout ratio",
+                "choices": [],
+                "secret": False,
+            },
+            {
+                "key": "strict_mode",
+                "type": "bool",
+                "default": True,
+                "required": True,
+                "label": "Strict mode",
+                "description": "Strict mode",
+                "choices": [],
+                "secret": False,
+            },
+        ]
+        raw_cfg = {
+            "school_extra": {
+                "retry_count": 0,
+                "timeout_ratio": 0.0,
+                "strict_mode": False,
+            }
+        }
+
+        ok, errors = config.validate_school_extra(raw_cfg, descriptors)
+
+        self.assertTrue(ok)
+        self.assertEqual([], errors)
+        self.assertEqual(
+            {"retry_count": "0", "timeout_ratio": "0.0", "strict_mode": "0"},
+            config.normalize_school_extra(raw_cfg, descriptors),
+        )
+
+    def test_main_config_helpers_normalize_dirty_school_extra_with_descriptors(self):
+        descriptors = [
+            {
+                "key": "strict_mode",
+                "type": "bool",
+                "default": True,
+                "required": False,
+                "label": "Strict mode",
+                "description": "Strict mode",
+                "choices": [],
+                "secret": False,
+            },
+            {
+                "key": "retry_count",
+                "type": "int",
+                "default": 3,
+                "required": False,
+                "label": "Retry count",
+                "description": "Retry count",
+                "choices": [],
+                "secret": False,
+            },
+        ]
+        raw_cfg = {
+            "school": "runtime-school",
+            "school_extra": {
+                "strict_mode": False,
+                "retry_count": 0,
+                "unknown": "drop-me",
+            },
+        }
+
+        with mock.patch(
+            "schools.get_school_metadata",
+            return_value=self._school_metadata(descriptors=descriptors),
+        ):
+            config.save_json_raw_config(raw_cfg)
+            persisted = config.load_json_raw_config()
+            loaded = config.load_config()
+
+        self.assertEqual(
+            {"strict_mode": "0", "retry_count": "0"},
+            persisted.get("school_extra"),
+        )
+        self.assertEqual(
+            {"strict_mode": "0", "retry_count": "0"},
+            loaded.get("school_extra"),
+        )
+
+    def test_main_config_helpers_collapse_invalid_school_extra_payload(self):
+        descriptors = [
+            {
+                "key": "strict_mode",
+                "type": "bool",
+                "default": True,
+                "required": False,
+                "label": "Strict mode",
+                "description": "Strict mode",
+                "choices": [],
+                "secret": False,
+            }
+        ]
+        raw_cfg = {
+            "school": "runtime-school",
+            "school_extra": {
+                "strict_mode": "definitely",
+                "unknown": "drop-me",
+            },
+        }
+
+        with mock.patch(
+            "schools.get_school_metadata",
+            return_value=self._school_metadata(descriptors=descriptors),
+        ):
+            config.save_json_raw_config(raw_cfg)
+            persisted = config.load_json_raw_config()
+            loaded = config.load_config()
+
+        self.assertEqual({}, persisted.get("school_extra"))
+        self.assertEqual({}, loaded.get("school_extra"))
+
     def test_load_config_uses_school_metadata_for_no_suffix_operators(self):
         raw_cfg = {
             "school": "runtime-school",
@@ -133,7 +275,7 @@ class SchoolRuntimeConfigTests(unittest.TestCase):
             mock.patch.object(config, "load_json_raw_config", return_value=raw_cfg),
             mock.patch(
                 "schools.get_school_metadata",
-                return_value={"no_suffix_operators": ["cucc"]},
+                return_value=self._school_metadata(no_suffix_operators=["cucc"]),
             ),
             mock.patch(
                 "schools.get_profile",

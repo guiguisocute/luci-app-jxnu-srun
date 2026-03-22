@@ -214,7 +214,7 @@ def save_json_raw_config(raw_cfg):
     for key in LIST_KEYS:
         val = raw_cfg.get(key)
         payload[key] = val if isinstance(val, list) else []
-    payload[SCHOOL_EXTRA_KEY] = load_school_extra(raw_cfg)
+    payload[SCHOOL_EXTRA_KEY] = _normalize_declared_school_extra(raw_cfg)
 
     ensure_parent_dir(JSON_CONFIG_FILE)
     tmp_path = JSON_CONFIG_FILE + ".tmp"
@@ -308,6 +308,14 @@ def load_school_extra(raw_cfg):
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def _school_extra_value_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
 def _normalize_school_extra_descriptor(descriptor):
     if not isinstance(descriptor, dict):
         return None
@@ -345,7 +353,7 @@ def _normalize_school_extra_descriptors(descriptors):
 
 def _coerce_school_extra_value(value, descriptor):
     value_type = descriptor.get("type", "string")
-    text = str(value or "").strip()
+    text = _school_extra_value_text(value)
 
     if value_type == "bool":
         lowered = text.lower()
@@ -371,7 +379,7 @@ def validate_school_extra(raw_cfg, descriptors):
     for descriptor in _normalize_school_extra_descriptors(descriptors):
         key = descriptor["key"]
         label = descriptor["label"]
-        text = str(payload.get(key, "") or "").strip()
+        text = _school_extra_value_text(payload.get(key))
 
         if descriptor["required"] and not text:
             errors.append({"key": key, "message": "%s is required." % label})
@@ -440,6 +448,21 @@ def normalize_school_extra(raw_cfg, descriptors):
         if value != "":
             normalized[key] = value
     return normalized
+
+
+def _get_school_extra_descriptors(cfg):
+    metadata = _get_school_metadata(cfg)
+    descriptors = metadata.get("school_extra")
+    if isinstance(descriptors, list):
+        return descriptors
+    descriptors = metadata.get("school_extra_descriptors")
+    if isinstance(descriptors, list):
+        return descriptors
+    return []
+
+
+def _normalize_declared_school_extra(cfg):
+    return normalize_school_extra(cfg, _get_school_extra_descriptors(cfg))
 
 
 def _get_school_metadata(cfg):
@@ -886,7 +909,7 @@ def load_config():
     for key in LIST_KEYS:
         val = raw.get(key)
         cfg[key] = val if isinstance(val, list) else []
-    cfg[SCHOOL_EXTRA_KEY] = load_school_extra(raw)
+    cfg[SCHOOL_EXTRA_KEY] = _normalize_declared_school_extra(raw)
 
     if str(raw.get("retry_cooldown_seconds", "")).strip() == "":
         cfg["retry_cooldown_seconds"] = str(
