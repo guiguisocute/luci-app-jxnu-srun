@@ -216,8 +216,8 @@ def default_run_quiet_logout(app_ctx):
     ok, message = runtime.logout_once(app_ctx)
     if ok:
         offline, offline_msg = srun_auth.wait_for_logout_status(
-            runtime,
-            runtime.build_urls(cfg["base_url"])["rad_user_info_api"],
+            app_ctx,
+            None,
             cfg,
         )
         if offline:

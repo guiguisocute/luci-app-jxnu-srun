@@ -134,11 +134,22 @@ def query_online_status(
 def wait_for_logout_status(
     profile, rad_user_info_api, cfg, bind_ip=None, attempts=3, delay_seconds=1
 ):
+    app_ctx = None
+    expected_username = cfg["username"]
+    query_target = profile
+    query_api = rad_user_info_api
+
+    if is_app_context(profile):
+        app_ctx = profile
+        expected_username = app_ctx["cfg"].get("username", expected_username)
+        query_target = app_ctx
+        query_api = None
+
     attempts = max(int(attempts), 1)
     last_message = ""
     for idx in range(attempts):
         online, message = query_online_status(
-            profile, rad_user_info_api, cfg["username"], bind_ip=bind_ip
+            query_target, query_api, expected_username, bind_ip=bind_ip
         )
         last_message = message
         if not online:

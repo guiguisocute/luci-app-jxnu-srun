@@ -193,6 +193,33 @@ class SchoolRuntimeDispatchTests(unittest.TestCase):
         self.assertEqual((ok, message), (True, "runtime-quiet-logout"))
         self.assertIn(("quiet_logout", self.cfg["username"]), self.runtime.calls)
 
+    def test_quiet_window_logout_followup_status_uses_runtime_dispatch(self):
+        class FollowupRuntime(FakeRuntime):
+            def logout_once(self, app_ctx, override_user_id=None, bind_ip=None):
+                self.calls.append(("logout_once", override_user_id, bind_ip))
+                return True, "runtime-logout"
+
+            def query_online_status(
+                self, app_ctx, expected_username=None, bind_ip=None
+            ):
+                self.calls.append(("query_online_status", expected_username, bind_ip))
+                return False, "离线"
+
+            def build_online_query_params(self):
+                raise AssertionError("low-level path used: build_online_query_params")
+
+        runtime = FollowupRuntime()
+        app_ctx = dict(self.app_ctx)
+        app_ctx["runtime"] = runtime
+
+        ok, message = orchestrator.default_run_quiet_logout(app_ctx)
+
+        self.assertEqual((ok, message), (True, "夜间停用下线成功"))
+        self.assertIn(("logout_once", None, None), runtime.calls)
+        self.assertIn(
+            ("query_online_status", self.cfg["username"], None), runtime.calls
+        )
+
     def test_snapshot_uses_runtime_online_identity_override(self):
         with (
             mock.patch.object(
