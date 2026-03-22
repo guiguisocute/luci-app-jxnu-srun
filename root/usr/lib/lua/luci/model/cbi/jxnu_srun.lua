@@ -272,6 +272,201 @@ end
 
 local RADIO_CHOICES = load_radio_choices()
 
+local function is_github_username(value)
+    local username = tostring(value or "")
+    if #username < 2 or #username > 39 then
+        return false
+    end
+    if username:find("%-%-", 1, true) then
+        return false
+    end
+    return username:match("^@[A-Za-z0-9][A-Za-z0-9%-]*[A-Za-z0-9]$") ~= nil
+        or username:match("^@[A-Za-z0-9]$") ~= nil
+end
+
+local function render_school_info_html(schools, current_school)
+    local cur_desc = ""
+    local cur_contributors = {}
+    local helper_prefix = "如果该配置无法在您的学校使用，请直接前往"
+    local helper_suffix = "提交 Issue 或 PR"
+    local helper_link = "https://github.com/matthewlu070111/luci-app-jxnu-srun"
+
+    for _, sch in ipairs(schools or {}) do
+        if sch.short_name == current_school then
+            cur_desc = tostring(sch.description or "")
+            if type(sch.contributors) == "table" then
+                cur_contributors = sch.contributors
+            end
+            break
+        end
+    end
+
+    local show_desc = cur_desc ~= ""
+    local show_contrib = #cur_contributors > 0
+    local contrib_spacing = "4px"
+    local helper_spacing = "4px"
+    local cur_contrib_html = {}
+    local js_data = jsonc.stringify(schools or {}) or "[]"
+
+    for _, contributor in ipairs(cur_contributors) do
+        local text = tostring(contributor or "")
+        if is_github_username(text) then
+            cur_contrib_html[#cur_contrib_html + 1] = string.format(
+                '<a href="https://github.com/%s" target="_blank" rel="noopener noreferrer">%s</a>',
+                util.pcdata(text:sub(2)),
+                util.pcdata(text)
+            )
+        else
+            cur_contrib_html[#cur_contrib_html + 1] = string.format('<span>%s</span>', util.pcdata(text))
+        end
+    end
+
+    return string.format([[
+<div id="jxnu-school-info" class="cbi-value-description" style="color:#14532d;opacity:0.9;display:block;line-height:1.6;">
+  <div id="jxnu-school-desc" style="display:%s;">
+    <strong>该配置在以下学校已得到验证：</strong> <span id="jxnu-school-desc-text">%s</span>
+  </div>
+  <div id="jxnu-school-contrib" style="display:%s;margin-top:%s;">
+    <strong>贡献者:</strong> <span id="jxnu-school-contrib-text">%s</span>
+  </div>
+  <div id="jxnu-school-helper" style="display:block;margin-top:%s;color:#6b7280;font-size:0.92em;">
+    %s<a id="jxnu-school-repo-link" href="%s" target="_blank" rel="noopener noreferrer">插件仓库</a>%s
+  </div>
+  <textarea id="jxnu-school-data" style="display:none;">%s</textarea>
+</div>
+<script type="text/javascript">
+(function() {
+  if (window.__jxnuSchoolInfoInit) return;
+  window.__jxnuSchoolInfoInit = true;
+  var schoolDataEl = document.getElementById('jxnu-school-data');
+  var schools = [];
+  var infoBox = document.getElementById('jxnu-school-info');
+  var descEl = document.getElementById('jxnu-school-desc');
+  var descTextEl = document.getElementById('jxnu-school-desc-text');
+  var contribEl = document.getElementById('jxnu-school-contrib');
+  var contribTextEl = document.getElementById('jxnu-school-contrib-text');
+  var helperEl = document.getElementById('jxnu-school-helper');
+  var outerDescEl = null;
+  if (!infoBox || !descEl || !descTextEl || !contribEl || !contribTextEl || !helperEl) return;
+
+  for (var parent = infoBox.parentNode; parent; parent = parent.parentNode) {
+    if (parent.className && String(parent.className).indexOf('cbi-value-description') >= 0) {
+      outerDescEl = parent;
+      break;
+    }
+  }
+
+  if (schoolDataEl) {
+    try {
+      schools = JSON.parse(schoolDataEl.value || schoolDataEl.textContent || '[]');
+    } catch (e) {
+      schools = [];
+    }
+  }
+
+  function lookup(sn) {
+    for (var i = 0; i < schools.length; i++) {
+      if (schools[i].short_name === sn) return schools[i];
+    }
+    return null;
+  }
+
+  function isGithubUsername(value) {
+    return /^@[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/.test(value || '')
+      && !/--/.test(value || '')
+      && !/-$/.test(value || '');
+  }
+
+  function clearNode(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function renderContributors(contributors) {
+    clearNode(contribTextEl);
+    for (var i = 0; i < contributors.length; i++) {
+      var text = String(contributors[i] == null ? '' : contributors[i]);
+      if (i > 0) contribTextEl.appendChild(document.createTextNode(', '));
+      if (isGithubUsername(text)) {
+        var link = document.createElement('a');
+        link.href = 'https://github.com/' + text.substring(1);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = text;
+        contribTextEl.appendChild(link);
+      } else {
+        var span = document.createElement('span');
+        span.textContent = text;
+        contribTextEl.appendChild(span);
+      }
+    }
+  }
+
+  function sync(desc, contributors) {
+    var hasDesc = !!desc;
+    var hasContrib = contributors && contributors.length;
+    var hasHelper = true;
+    infoBox.style.display = (hasDesc || hasContrib || hasHelper) ? 'block' : 'none';
+    if (outerDescEl) outerDescEl.style.display = (hasDesc || hasContrib || hasHelper) ? 'block' : 'none';
+    descEl.style.display = hasDesc ? 'block' : 'none';
+    contribEl.style.display = hasContrib ? 'block' : 'none';
+    helperEl.style.display = hasHelper ? 'block' : 'none';
+    contribEl.style.marginTop = hasDesc ? '%s' : '0';
+    helperEl.style.marginTop = (hasDesc || hasContrib) ? '%s' : '0';
+    descTextEl.textContent = desc || '';
+    renderContributors(hasContrib ? contributors : []);
+  }
+
+  function update(val) {
+    var school = lookup(val);
+    if (!school) {
+      sync('', []);
+      return;
+    }
+    sync(
+      school.description || '',
+      (school.contributors && school.contributors.length)
+        ? school.contributors
+        : []
+    );
+  }
+
+  function findSchoolSelect() {
+    var node = infoBox;
+    while (node) {
+      if (node.className && String(node.className).indexOf('cbi-value-field') >= 0) {
+        var inner = node.querySelector('select');
+        if (inner) return inner;
+        break;
+      }
+      node = node.parentNode;
+    }
+
+    return document.getElementById('widget.cbid.jxnu_srun.main.school')
+      || document.getElementById('cbid.jxnu_srun.main.school')
+      || document.querySelector('select[name="cbid.jxnu_srun.main.school"]');
+  }
+
+  var sel = findSchoolSelect();
+  if (!sel) return;
+  update(sel.value);
+  sel.addEventListener('change', function() { update(sel.value); });
+})();
+</script>
+]],
+        show_desc and "block" or "none",
+        util.pcdata(cur_desc),
+        show_contrib and "block" or "none",
+        show_desc and show_contrib and contrib_spacing or "0",
+        table.concat(cur_contrib_html, ", "),
+        (show_desc or show_contrib) and helper_spacing or "0",
+        helper_prefix,
+        helper_link,
+        helper_suffix,
+        util.pcdata(js_data),
+        contrib_spacing,
+        helper_spacing)
+end
+
 local cfg = load_cfg()
 local changed = false
 
@@ -324,7 +519,7 @@ end
 
 local quiet_desc = string.format("当前下线/上线时间：%s / %s", cfg.quiet_start or "00:00", cfg.quiet_end or "06:00")
 
-m = Map("jxnu_srun", "师大校园网", "江西师范大学校园网认证配置（JSON后端）")
+m = Map("jxnu_srun", "深澜校园网", "深澜校园网认证配置")
 if not m.uci:get("jxnu_srun", "main") then
     m.uci:section("jxnu_srun", "main", "main")
     m.uci:save("jxnu_srun")
@@ -439,80 +634,7 @@ end
 function school.write(self, section, value)
     set_value("school", util.trim(value or "jxnu"))
 end
-
--- 学校信息提示区（Lua 预渲染当前学校 + JS 动态切换）
-school_info = s:taboption("basic", DummyValue, "_school_info", "")
-school_info.rawhtml = true
-function school_info.cfgvalue()
-    -- 服务端预渲染：查找当前选中学校的信息
-    local current_school = cfg.school or "jxnu"
-    local cur_desc = ""
-    local cur_contrib = ""
-    for _, sch in ipairs(schools) do
-        if sch.short_name == current_school then
-            cur_desc = tostring(sch.description or "")
-            if type(sch.contributors) == "table" and #sch.contributors > 0 then
-                cur_contrib = "贡献者: " .. table.concat(sch.contributors, ", ")
-            end
-            break
-        end
-    end
-    local show = (cur_desc ~= "") and "block" or "none"
-
-    -- 将全量学校数据序列化给 JS 用于动态切换
-    local js_data = jsonc.stringify(schools) or "[]"
-
-    return string.format([[
-<div id="jxnu-school-info" class="cbi-value-description"
-     style="color:#16a34a;font-weight:700;display:%s;">
-  <span id="jxnu-school-desc">%s</span>
-  <span id="jxnu-school-contrib" style="margin-left:8px;">%s</span>
-</div>
-<script type="text/javascript">
-(function() {
-  if (window.__jxnuSchoolInfoInit) return;
-  window.__jxnuSchoolInfoInit = true;
-  var schools = %s;
-  var infoBox = document.getElementById('jxnu-school-info');
-  var descEl  = document.getElementById('jxnu-school-desc');
-  var contribEl = document.getElementById('jxnu-school-contrib');
-  if (!infoBox) return;
-
-  function lookup(sn) {
-    for (var i = 0; i < schools.length; i++) {
-      if (schools[i].short_name === sn) return schools[i];
-    }
-    return null;
-  }
-
-  function update(val) {
-    var s = lookup(val);
-    if (!s) { infoBox.style.display = 'none'; return; }
-    infoBox.style.display = 'block';
-    descEl.textContent = s.description || '';
-    contribEl.textContent = (s.contributors && s.contributors.length)
-      ? '\u8d21\u732e\u8005: ' + s.contributors.join(', ')
-      : '';
-  }
-
-  // 找下拉框：遍历所有 select 找含 school option 值的那个
-  var allSelects = document.querySelectorAll('select');
-  var sel = null;
-  for (var i = 0; i < allSelects.length; i++) {
-    var opts = allSelects[i].options;
-    for (var j = 0; j < opts.length; j++) {
-      if (opts[j].value === '%s') { sel = allSelects[i]; break; }
-    }
-    if (sel) break;
-  }
-
-  if (sel) {
-    sel.addEventListener('change', function() { update(sel.value); });
-  }
-})();
-</script>
-]], show, cur_desc, cur_contrib, js_data, current_school)
-end
+school.description = render_school_info_html(schools, cfg.school or "jxnu")
 
 manual_login = s:taboption("basic", DummyValue, "_manual_login", "手动登录")
 manual_login.rawhtml = true
