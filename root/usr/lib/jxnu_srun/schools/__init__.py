@@ -146,4 +146,11 @@ def list_schools():
 def get_default_profile():
     import school_runtime
 
+    _discover()
+    if "jxnu" in _SCHOOL_ENTRIES:
+        return school_runtime.resolve_runtime({"school": "jxnu"})
+    if _SCHOOL_ENTRIES:
+        return school_runtime.resolve_runtime(
+            {"school": next(iter(_SCHOOL_ENTRIES.keys()))}
+        )
     return school_runtime.DefaultRuntime()

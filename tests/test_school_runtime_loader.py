@@ -185,6 +185,38 @@ class SchoolRuntimeLoaderTests(unittest.TestCase):
         self.assertIsInstance(legacy, school_runtime.LegacyProfileRuntimeAdapter)
         self.assertEqual(legacy.SHORT_NAME, "legacy-only")
 
+    def test_schools_get_profile_keeps_legacy_metadata_fields_on_runtime_objects(self):
+        with TemporarySchoolModule(
+            "zz_runtime_metadata_bridge",
+            """
+            from school_runtime import RUNTIME_API_VERSION
+
+            SCHOOL_METADATA = {
+                "short_name": "runtime-bridge",
+                "name": "Runtime Bridge",
+                "description": "metadata bridge",
+                "contributors": ["@bridge"],
+                "operators": [{"id": "cucc", "label": "CUCC", "verified": True}],
+                "no_suffix_operators": ["xn"],
+            }
+
+            class Runtime(object):
+                def __init__(self, core_api, cfg):
+                    self.runtime_api_version = RUNTIME_API_VERSION
+                    self.declared_capabilities = ()
+            """,
+        ):
+            schools = importlib.reload(importlib.import_module("schools"))
+            runtime = schools.get_profile("runtime-bridge")
+
+        self.assertEqual(runtime.SHORT_NAME, "runtime-bridge")
+        self.assertEqual(runtime.NAME, "Runtime Bridge")
+        self.assertEqual(runtime.DESCRIPTION, "metadata bridge")
+        self.assertEqual(
+            runtime.OPERATORS, ({"id": "cucc", "label": "CUCC", "verified": True},)
+        )
+        self.assertEqual(runtime.NO_SUFFIX_OPERATORS, ("xn",))
+
     def test_resolve_runtime_rejects_unknown_school_but_allows_default_paths(self):
         school_runtime = load_school_runtime_module(self)
 
@@ -202,6 +234,13 @@ class SchoolRuntimeLoaderTests(unittest.TestCase):
 
         with self.assertRaises(LookupError):
             srun_auth.get_profile({"school": "missing-school"})
+
+    def test_get_default_profile_prefers_jxnu_when_available(self):
+        schools = importlib.import_module("schools")
+        default_profile = schools.get_default_profile()
+
+        self.assertEqual(default_profile.SHORT_NAME, "jxnu")
+        self.assertEqual(default_profile.NAME, "默认配置")
 
     def test_inspect_runtime_exposes_runtime_contract_details(self):
         school_runtime = load_school_runtime_module(self)

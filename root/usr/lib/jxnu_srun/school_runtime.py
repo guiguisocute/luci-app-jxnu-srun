@@ -25,6 +25,16 @@ def build_core_api():
     }
 
 
+def _apply_legacy_profile_metadata(runtime, metadata):
+    runtime.SHORT_NAME = metadata.get("short_name", "")
+    runtime.NAME = metadata.get("name", "")
+    runtime.DESCRIPTION = metadata.get("description", "")
+    runtime.CONTRIBUTORS = tuple(metadata.get("contributors", ()))
+    runtime.OPERATORS = tuple(metadata.get("operators", ()))
+    runtime.NO_SUFFIX_OPERATORS = tuple(metadata.get("no_suffix_operators", ()))
+    return runtime
+
+
 class LegacyProfileRuntimeAdapter(object):
     def __init__(self, profile, source_file=None, metadata=None):
         self._profile = profile
@@ -32,6 +42,7 @@ class LegacyProfileRuntimeAdapter(object):
         self.runtime_api_version = RUNTIME_API_VERSION
         self.source_file = source_file or getattr(profile.__class__, "__file__", "")
         self.declared_capabilities = tuple((metadata or {}).get("capabilities", ()))
+        _apply_legacy_profile_metadata(self, metadata or {})
 
     def __getattr__(self, name):
         return getattr(self._profile, name)
@@ -59,6 +70,7 @@ def _get_runtime_metadata(short_name):
 
 
 def _finalize_runtime(runtime, metadata, runtime_type, source_file):
+    _apply_legacy_profile_metadata(runtime, metadata)
     runtime.runtime_type = getattr(runtime, "runtime_type", runtime_type)
     runtime.runtime_api_version = getattr(
         runtime, "runtime_api_version", RUNTIME_API_VERSION
