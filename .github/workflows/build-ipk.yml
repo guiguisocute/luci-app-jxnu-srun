@@ -125,8 +125,11 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p artifacts
+          echo "=== All ipk files ==="
+          find openwrt/bin -type f -name '*.ipk' | sort
+          echo "====================="
           for pattern in 'jxnu-srun_*.ipk' 'luci-app-jxnu-srun*.ipk'; do
-            IPK="$(find openwrt/bin/packages -type f -name "$pattern" | head -n1)"
+            IPK="$(find openwrt/bin -type f -name "$pattern" | head -n1)"
             if [ -n "$IPK" ]; then
               cp -v "$IPK" "artifacts/$(basename "$IPK")"
             fi
