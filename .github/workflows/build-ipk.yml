@@ -94,7 +94,7 @@ jobs:
       - name: Update and install required feeds
         working-directory: openwrt
         run: |
-          ./scripts/feeds update -a
+          ./scripts/feeds update luci
           ./scripts/feeds install -p luci -a
 
       - name: Inject package
