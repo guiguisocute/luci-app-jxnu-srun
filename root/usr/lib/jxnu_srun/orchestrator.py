@@ -46,12 +46,14 @@ from wireless import (
     wait_for_network_interface_ipv4,
 )
 import srun_auth
+from school_runtime import build_app_context
 from snapshot import build_runtime_snapshot
 
 
 # ---------------------------------------------------------------------------
 # 退避计算
 # ---------------------------------------------------------------------------
+
 
 def connectivity_mode_matches(snapshot, cfg, require_ssid=False):
     mode = str(cfg.get("connectivity_check_mode", "internet")).strip().lower()
@@ -85,6 +87,7 @@ def calc_backoff_delay_seconds(cfg, failure_index):
 # 重试包装
 # ---------------------------------------------------------------------------
 
+
 def run_once_with_retry(cfg, ignore_service_disabled=False):
     ok, message = srun_auth.run_once_safe(cfg)
     if ok:
@@ -93,8 +96,13 @@ def run_once_with_retry(cfg, ignore_service_disabled=False):
     log("ERROR", "login_failed", "first attempt failed", reason=message)
 
     if not backoff_enabled(cfg):
-        log("INFO", "retry_scheduled", "single retry scheduled",
-            delay=int(get_retry_cooldown_seconds(cfg)), backoff="off")
+        log(
+            "INFO",
+            "retry_scheduled",
+            "single retry scheduled",
+            delay=int(get_retry_cooldown_seconds(cfg)),
+            backoff="off",
+        )
         time.sleep(get_retry_cooldown_seconds(cfg))
         retry_ok, retry_message = srun_auth.run_once_safe(cfg)
         if retry_ok:
@@ -147,7 +155,9 @@ def run_once_manual(cfg):
 # 安静时段 / 状态查询
 # ---------------------------------------------------------------------------
 
+
 def quiet_connection_state(cfg, urls=None):
+    app_ctx = build_app_context(cfg)
     runtime_mode = detect_runtime_mode(cfg)
     if runtime_mode == "hotspot":
         return "热点已连接"
@@ -156,59 +166,59 @@ def quiet_connection_state(cfg, urls=None):
         return "未连接"
 
     if urls is None:
-        urls = srun_auth.build_urls(cfg)
+        urls = app_ctx["runtime"].build_urls(cfg["base_url"])
 
-    profile = srun_auth.get_profile(cfg)
     try:
-        online, _ = srun_auth.query_online_status(
-            profile, urls["rad_user_info_api"], cfg["username"]
-        )
+        online, _ = app_ctx["runtime"].query_online_status(app_ctx)
         return "在线" if online else "未连接"
     except Exception:
         return "未连接"
 
 
-def run_status(cfg):
+def default_run_status(app_ctx):
+    cfg = app_ctx["cfg"]
     mode_hint = ""
     from config import failover_enabled
+
     if failover_enabled(cfg):
         mode_hint = "（校园网SSID: %s，热点SSID: %s）" % (
             cfg.get("campus_ssid", "jxnu_stu"),
             cfg.get("hotspot_ssid", "未设置"),
         )
 
-    urls = srun_auth.build_urls(cfg)
-    profile = srun_auth.get_profile(cfg)
-
     if in_quiet_window(cfg):
-        state = quiet_connection_state(cfg, urls)
+        state = quiet_connection_state(cfg)
         return False, "夜间停用（%s）" % state + mode_hint
 
     if not cfg["username"]:
         return False, "未配置学工号" + mode_hint
 
-    online, message = srun_auth.query_online_status(
-        profile, urls["rad_user_info_api"], cfg["username"]
-    )
+    online, message = app_ctx["runtime"].query_online_status(app_ctx)
     return online, localize_error(message) + mode_hint
 
 
-def run_quiet_logout(cfg):
-    urls = srun_auth.build_urls(cfg)
-    profile = srun_auth.get_profile(cfg)
+def run_status(cfg):
+    app_ctx = build_app_context(cfg)
+    return app_ctx["runtime"].status(app_ctx)
+
+
+def default_run_quiet_logout(app_ctx):
+    cfg = app_ctx["cfg"]
+    runtime = app_ctx["runtime"]
 
     if cfg.get("force_logout_in_quiet") != "1":
-        state = quiet_connection_state(cfg, urls)
+        state = quiet_connection_state(cfg)
         return True, "夜间停用（%s）" % state
 
     if not cfg["username"]:
         return False, "夜间停用下线失败: 未配置学工号"
 
-    ip = srun_auth.init_getip(urls["init_url"])
-    ok, message = srun_auth.logout(profile, urls["rad_user_dm_api"], cfg, ip)
+    ok, message = runtime.logout_once(app_ctx)
     if ok:
         offline, offline_msg = srun_auth.wait_for_logout_status(
-            profile, urls["rad_user_info_api"], cfg
+            runtime,
+            runtime.build_urls(cfg["base_url"])["rad_user_info_api"],
+            cfg,
         )
         if offline:
             return True, "夜间停用下线成功"
@@ -220,9 +230,15 @@ def run_quiet_logout(cfg):
     return False, "夜间停用下线失败: " + localize_error(message)
 
 
+def run_quiet_logout(cfg):
+    app_ctx = build_app_context(cfg)
+    return app_ctx["runtime"].quiet_logout(app_ctx)
+
+
 # ---------------------------------------------------------------------------
 # WiFi 前置准备
 # ---------------------------------------------------------------------------
+
 
 def prepare_campus_for_login(cfg):
     ok, msg, _ = ensure_expected_profile(cfg, expect_hotspot=False, last_switch_ts=0)
@@ -235,18 +251,18 @@ def prepare_campus_for_login(cfg):
 # 手动登出
 # ---------------------------------------------------------------------------
 
+
 def run_manual_logout(cfg, override_user_id=None):
     if not cfg["username"]:
         return False, "未配置学工号"
 
-    profile = srun_auth.get_profile(cfg)
-    urls = srun_auth.build_urls(cfg)
+    app_ctx = build_app_context(cfg)
+    runtime = app_ctx["runtime"]
+    urls = runtime.build_urls(cfg["base_url"])
     bip = resolve_bind_ip(urls["init_url"], cfg)
 
     try:
-        online_now, online_user, _ = srun_auth.query_online_identity(
-            profile, urls["rad_user_info_api"], cfg["username"], bind_ip=bip
-        )
+        online_now, online_user, _ = runtime.query_online_identity(app_ctx, bind_ip=bip)
         logout_user = str(override_user_id or online_user or "").strip()
         if not online_now or not logout_user:
             return True, "已离线"
@@ -254,20 +270,23 @@ def run_manual_logout(cfg, override_user_id=None):
         logout_cfg = dict(cfg)
         logout_cfg["user_id"] = logout_user
         logout_cfg["username"] = logout_user
-        ip = srun_auth.init_getip(urls["init_url"], bind_ip=bip)
-        log("INFO", "logout_request", "sending logout request",
-            account=logout_user, ip=ip)
-        ok, message = srun_auth.logout(
-            profile, urls["rad_user_dm_api"], logout_cfg, ip, bind_ip=bip
+        log(
+            "INFO",
+            "logout_request",
+            "sending logout request",
+            account=logout_user,
+        )
+        ok, message = runtime.logout_once(
+            build_app_context(logout_cfg, runtime=runtime),
+            override_user_id=logout_user,
+            bind_ip=bip,
         )
         if ok:
-            log("INFO", "logout_request", "logout request accepted",
-                result=message)
+            log("INFO", "logout_request", "logout request accepted", result=message)
             max_attempts = get_manual_terminal_check_attempts(cfg)
             interval_seconds = get_manual_terminal_check_interval_seconds(cfg)
             ready_ok, ready_msg = wait_for_manual_logout_ready(
-                profile,
-                urls["rad_user_info_api"],
+                build_app_context(logout_cfg, runtime=runtime),
                 logout_cfg,
                 bind_ip=bip,
                 attempts=max_attempts,
@@ -276,16 +295,13 @@ def run_manual_logout(cfg, override_user_id=None):
             if ready_ok:
                 log("INFO", "logout_success", account=logout_user)
                 return True, "登出成功"
-            log("WARN", "logout_verify_failed", attempts=max_attempts,
-                result=ready_msg)
+            log("WARN", "logout_verify_failed", attempts=max_attempts, result=ready_msg)
             return False, "登出失败：%s" % ready_msg
 
         localized = localize_error(message)
         log("ERROR", "logout_failed", reason=localized)
         try:
-            online, online_msg = srun_auth.query_online_status(
-                profile, urls["rad_user_info_api"], cfg["username"], bind_ip=bip
-            )
+            online, online_msg = runtime.query_online_status(app_ctx, bind_ip=bip)
             if not online:
                 return True, "已离线"
             return False, "登出失败: " + localize_error(online_msg)
@@ -296,15 +312,14 @@ def run_manual_logout(cfg, override_user_id=None):
 
 
 def wait_for_manual_logout_ready(
-    profile, rad_user_info_api, cfg, bind_ip=None, attempts=5, delay_seconds=2
+    app_ctx, cfg, bind_ip=None, attempts=5, delay_seconds=2
 ):
     attempts = max(int(attempts), 1)
     last_message = ""
     for idx in range(attempts):
-        log("INFO", "status_query", "logout verify check",
-            attempt=idx + 1)
-        online, offline_msg = srun_auth.query_online_status(
-            profile, rad_user_info_api, cfg["username"], bind_ip=bind_ip
+        log("INFO", "status_query", "logout verify check", attempt=idx + 1)
+        online, offline_msg = app_ctx["runtime"].query_online_status(
+            app_ctx, bind_ip=bind_ip
         )
         if not online:
             internet_ok, internet_msg = test_internet_connectivity(timeout=2)
@@ -324,31 +339,48 @@ def wait_for_manual_logout_ready(
 # 手动登录预清理
 # ---------------------------------------------------------------------------
 
+
 def clean_slate_for_manual_login(cfg, online_user=""):
     if campus_uses_wired(cfg):
         if online_user:
-            log("INFO", "manual_preclean", "found online account, logging out",
-                account=online_user)
+            log(
+                "INFO",
+                "manual_preclean",
+                "found online account, logging out",
+                account=online_user,
+            )
             ok, message = run_manual_logout(cfg, override_user_id=online_user)
             if not ok:
-                log("ERROR", "manual_login_failed", "preclean logout failed",
-                    reason=message)
+                log(
+                    "ERROR",
+                    "manual_login_failed",
+                    "preclean logout failed",
+                    reason=message,
+                )
                 return False, message
-            log("INFO", "manual_preclean_done",
-                "preclean done: cleared previous online account")
+            log(
+                "INFO",
+                "manual_preclean_done",
+                "preclean done: cleared previous online account",
+            )
 
         active_data = parse_wireless_iface_data()
-        log("INFO", "manual_preclean",
-            "wired mode: disabling all managed STA sections")
+        log("INFO", "manual_preclean", "wired mode: disabling all managed STA sections")
         ok, message = disable_managed_sta_sections(cfg, active_data)
         if not ok:
-            log("ERROR", "manual_login_failed",
+            log(
+                "ERROR",
+                "manual_login_failed",
                 "preclean failed: could not disable managed STA",
-                reason=message or "unknown")
+                reason=message or "unknown",
+            )
             return False, message or "禁用历史 STA 接口失败"
 
-        log("INFO", "manual_preclean_done",
-            "wired mode: skipping wireless rebuild, using WAN")
+        log(
+            "INFO",
+            "manual_preclean_done",
+            "wired mode: skipping wireless rebuild, using WAN",
+        )
         wan_ip = wait_for_network_interface_ipv4(
             "wan", timeout_seconds=get_switch_ready_timeout_seconds(cfg)
         )
@@ -374,36 +406,55 @@ def clean_slate_for_manual_login(cfg, online_user=""):
         profile_changed = True
 
     if online_user:
-        log("INFO", "manual_preclean", "found online account, logging out",
-            account=online_user)
+        log(
+            "INFO",
+            "manual_preclean",
+            "found online account, logging out",
+            account=online_user,
+        )
         ok, message = run_manual_logout(cfg, override_user_id=online_user)
         if not ok:
-            log("ERROR", "manual_login_failed", "preclean logout failed",
-                reason=message)
+            log(
+                "ERROR", "manual_login_failed", "preclean logout failed", reason=message
+            )
             return False, message
-        log("INFO", "manual_preclean_done",
-            "preclean done: cleared previous online account")
+        log(
+            "INFO",
+            "manual_preclean_done",
+            "preclean done: cleared previous online account",
+        )
 
-    log("INFO", "manual_preclean",
-        "disabling all managed STA sections to clear stale connections")
+    log(
+        "INFO",
+        "manual_preclean",
+        "disabling all managed STA sections to clear stale connections",
+    )
     ok, message = disable_managed_sta_sections(cfg, active_data)
     if not ok:
-        log("ERROR", "manual_login_failed",
+        log(
+            "ERROR",
+            "manual_login_failed",
             "preclean failed: could not disable managed STA",
-            reason=message or "unknown")
+            reason=message or "unknown",
+        )
         return False, message or "禁用历史 STA 接口失败"
 
     if online_user or profile_changed:
-        log("INFO", "manual_preclean_done",
-            "managed STA disabled, rebuilding campus connection")
+        log(
+            "INFO",
+            "manual_preclean_done",
+            "managed STA disabled, rebuilding campus connection",
+        )
         ok2, sw_msg = switch_to_campus(cfg)
         if not ok2:
-            log("ERROR", "manual_login_failed",
+            log(
+                "ERROR",
+                "manual_login_failed",
                 "preclean failed: could not rebuild campus connection",
-                reason=sw_msg or "unknown")
+                reason=sw_msg or "unknown",
+            )
             return False, sw_msg or "切换校园网失败"
-        log("INFO", "manual_preclean_done",
-            "campus wireless profile rebuilt")
+        log("INFO", "manual_preclean_done", "campus wireless profile rebuilt")
 
     return True, ""
 
@@ -412,13 +463,15 @@ def clean_slate_for_manual_login(cfg, online_user=""):
 # 手动登录终态校验
 # ---------------------------------------------------------------------------
 
+
 def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
     attempts = max(int(attempts), 1)
     last_message = ""
     ready_label = get_manual_terminal_check_label(cfg)
     wired_mode = campus_uses_wired(cfg)
-    profile = srun_auth.get_profile(cfg)
-    urls = srun_auth.build_urls(cfg)
+    app_ctx = build_app_context(cfg)
+    runtime = app_ctx["runtime"]
+    urls = runtime.build_urls(cfg["base_url"])
     bind_ip = resolve_bind_ip(urls["init_url"], cfg)
     for idx in range(attempts):
         log("INFO", "status_query", "login verify check", attempt=idx + 1)
@@ -433,8 +486,8 @@ def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
         auth_online = False
         auth_message = ""
         try:
-            auth_online, auth_message = srun_auth.query_online_status(
-                profile, urls["rad_user_info_api"], cfg["username"], bind_ip=bind_ip
+            auth_online, auth_message = runtime.query_online_status(
+                app_ctx, bind_ip=bind_ip
             )
         except Exception as exc:
             auth_online = False
@@ -470,6 +523,7 @@ def wait_for_manual_login_ready(cfg, attempts=5, delay_seconds=2):
 # 手动登录全流程
 # ---------------------------------------------------------------------------
 
+
 def run_manual_login(cfg):
     service_guard_enabled = False
 
@@ -477,17 +531,18 @@ def run_manual_login(cfg):
         service_guard_enabled, _ = begin_manual_login_service_guard()
         if service_guard_enabled:
             cfg["enabled"] = "0"
-            log("INFO", "manual_login_start",
-                "service guard enabled: daemon paused during manual login")
+            log(
+                "INFO",
+                "manual_login_start",
+                "service guard enabled: daemon paused during manual login",
+            )
 
         cfg, _, _ = apply_default_selection_for_runtime(False, "手动登录前")
-        profile = srun_auth.get_profile(cfg)
-        urls = srun_auth.build_urls(cfg)
+        app_ctx = build_app_context(cfg)
+        runtime = app_ctx["runtime"]
 
         try:
-            online_now, online_user, _ = srun_auth.query_online_identity(
-                profile, urls["rad_user_info_api"], cfg["username"]
-            )
+            online_now, online_user, _ = runtime.query_online_identity(app_ctx)
         except Exception:
             online_now, online_user = False, ""
 
@@ -497,13 +552,20 @@ def run_manual_login(cfg):
         if not clean_ok:
             return False, clean_msg
 
-        log("INFO", "manual_login_start", "submitting auth request",
-            account=srun_auth.get_logout_username(cfg))
+        log(
+            "INFO",
+            "manual_login_start",
+            "submitting auth request",
+            account=srun_auth.get_logout_username(cfg),
+        )
         login_ok, login_msg = run_once_manual(cfg)
         if login_ok:
-            log("INFO", "manual_login_success",
+            log(
+                "INFO",
+                "manual_login_success",
                 "login request accepted, starting verification",
-                result=login_msg)
+                result=login_msg,
+            )
             max_attempts = get_manual_terminal_check_attempts(cfg)
             interval_seconds = get_manual_terminal_check_interval_seconds(cfg)
             ready_ok, ready_msg = wait_for_manual_login_ready(
@@ -512,17 +574,23 @@ def run_manual_login(cfg):
             if ready_ok:
                 log("INFO", "manual_login_success", result=ready_msg)
                 return True, "登录成功"
-            log("ERROR", "manual_login_failed",
+            log(
+                "ERROR",
+                "manual_login_failed",
                 "post-login verification failed",
-                attempts=max_attempts, result=ready_msg)
+                attempts=max_attempts,
+                result=ready_msg,
+            )
             return False, "登录后校验失败：%s" % ready_msg
 
-        log("ERROR", "manual_login_failed", "login stage failed",
-            reason=login_msg)
+        log("ERROR", "manual_login_failed", "login stage failed", reason=login_msg)
         return False, login_msg
     finally:
         if service_guard_enabled:
             restored, restored_enabled = restore_manual_login_service_guard()
             if restored and restored_enabled == "1":
-                log("INFO", "manual_login_start",
-                    "service guard restored: daemon re-enabled")
+                log(
+                    "INFO",
+                    "manual_login_start",
+                    "service guard restored: daemon re-enabled",
+                )

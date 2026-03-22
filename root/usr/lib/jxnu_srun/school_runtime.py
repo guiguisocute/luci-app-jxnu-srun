@@ -14,6 +14,9 @@ RUNTIME_API_VERSION = 1
 
 
 def build_core_api():
+    import orchestrator
+    import srun_auth
+
     return {
         "runtime_api_version": RUNTIME_API_VERSION,
         "get_base64": crypto.get_base64,
@@ -22,6 +25,12 @@ def build_core_api():
         "get_sha1": crypto.get_sha1,
         "get_info": crypto.get_info,
         "get_chksum": crypto.get_chksum,
+        "default_login_once": srun_auth.default_login_once,
+        "default_logout_once": srun_auth.default_logout_once,
+        "default_query_online_identity": srun_auth.default_query_online_identity,
+        "default_query_online_status": srun_auth.default_query_online_status,
+        "default_run_status": orchestrator.default_run_status,
+        "default_run_quiet_logout": orchestrator.default_run_quiet_logout,
     }
 
 
@@ -46,6 +55,30 @@ class LegacyProfileRuntimeAdapter(object):
 
     def __getattr__(self, name):
         return getattr(self._profile, name)
+
+    def login_once(self, app_ctx):
+        return app_ctx["core_api"]["default_login_once"](app_ctx)
+
+    def logout_once(self, app_ctx, override_user_id=None, bind_ip=None):
+        return app_ctx["core_api"]["default_logout_once"](
+            app_ctx, override_user_id=override_user_id, bind_ip=bind_ip
+        )
+
+    def query_online_identity(self, app_ctx, expected_username=None, bind_ip=None):
+        return app_ctx["core_api"]["default_query_online_identity"](
+            app_ctx, expected_username=expected_username, bind_ip=bind_ip
+        )
+
+    def query_online_status(self, app_ctx, expected_username=None, bind_ip=None):
+        return app_ctx["core_api"]["default_query_online_status"](
+            app_ctx, expected_username=expected_username, bind_ip=bind_ip
+        )
+
+    def status(self, app_ctx):
+        return app_ctx["core_api"]["default_run_status"](app_ctx)
+
+    def quiet_logout(self, app_ctx):
+        return app_ctx["core_api"]["default_run_quiet_logout"](app_ctx)
 
 
 class DefaultRuntime(LegacyProfileRuntimeAdapter):

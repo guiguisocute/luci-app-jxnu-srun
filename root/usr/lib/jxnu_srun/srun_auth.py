@@ -17,26 +17,21 @@ from network import (
     pick_valid_ip,
     resolve_bind_ip,
 )
+from school_runtime import build_app_context
 
 
 def get_profile(cfg):
-    """根据 cfg 中的 school 字段获取 profile 实例，找不到则使用默认"""
-    short = str((cfg or {}).get("school", "")).strip()
-    try:
-        import schools
+    return ensure_app_context(cfg)["runtime"]
 
-        if short:
-            p = schools.get_profile(short)
-            if p:
-                return p
-            raise LookupError("unknown school runtime: %s" % short)
-        return schools.get_default_profile()
-    except LookupError:
-        raise
-    except Exception:
-        from schools._base import SchoolProfile
 
-        return SchoolProfile()
+def is_app_context(value):
+    return isinstance(value, dict) and "cfg" in value and "runtime" in value
+
+
+def ensure_app_context(cfg_or_app_ctx, runtime=None):
+    if is_app_context(cfg_or_app_ctx):
+        return cfg_or_app_ctx
+    return build_app_context(cfg_or_app_ctx or {}, runtime=runtime)
 
 
 def get_logout_username(cfg):
@@ -97,7 +92,19 @@ def logout(profile, rad_user_dm_api, cfg, ip, bind_ip=None):
     return profile.parse_logout_response(data)
 
 
-def query_online_identity(profile, rad_user_info_api, expected_username, bind_ip=None):
+def query_online_identity(
+    profile, rad_user_info_api=None, expected_username=None, bind_ip=None
+):
+    if is_app_context(profile):
+        app_ctx = profile
+        resolved_username = expected_username
+        if resolved_username is None:
+            resolved_username = rad_user_info_api
+        if resolved_username is None:
+            resolved_username = app_ctx["cfg"].get("username", "")
+        return app_ctx["runtime"].query_online_identity(
+            app_ctx, expected_username=resolved_username, bind_ip=bind_ip
+        )
     params = profile.build_online_query_params()
     data = parse_jsonp(
         http_get(rad_user_info_api, params=params, timeout=5, bind_ip=bind_ip)
@@ -105,7 +112,19 @@ def query_online_identity(profile, rad_user_info_api, expected_username, bind_ip
     return profile.parse_online_status(data, expected_username)
 
 
-def query_online_status(profile, rad_user_info_api, expected_username, bind_ip=None):
+def query_online_status(
+    profile, rad_user_info_api=None, expected_username=None, bind_ip=None
+):
+    if is_app_context(profile):
+        app_ctx = profile
+        resolved_username = expected_username
+        if resolved_username is None:
+            resolved_username = rad_user_info_api
+        if resolved_username is None:
+            resolved_username = app_ctx["cfg"].get("username", "")
+        return app_ctx["runtime"].query_online_status(
+            app_ctx, expected_username=resolved_username, bind_ip=bind_ip
+        )
     online, _, message = query_online_identity(
         profile, rad_user_info_api, expected_username, bind_ip
     )
@@ -133,31 +152,44 @@ def wait_for_logout_status(
 # 核心登录流程（纯认证，不管 WiFi）
 # ---------------------------------------------------------------------------
 def build_urls(cfg):
-    profile = get_profile(cfg)
-    return profile.build_urls(cfg["base_url"])
+    app_ctx = ensure_app_context(cfg)
+    return app_ctx["runtime"].build_urls(app_ctx["cfg"]["base_url"])
 
 
-def run_once(cfg):
-    """纯认证流程：challenge -> 加密 -> login API。
-    不管 WiFi、不管 quiet hours、不管重试。"""
-    profile = get_profile(cfg)
-    urls = profile.build_urls(cfg["base_url"])
+def default_query_online_identity(app_ctx, expected_username=None, bind_ip=None):
+    runtime = app_ctx["runtime"]
+    cfg = app_ctx["cfg"]
+    urls = runtime.build_urls(cfg["base_url"])
+    expected = expected_username or cfg.get("username", "")
+    return query_online_identity(runtime, urls["rad_user_info_api"], expected, bind_ip)
+
+
+def default_query_online_status(app_ctx, expected_username=None, bind_ip=None):
+    online, _, message = default_query_online_identity(
+        app_ctx, expected_username=expected_username, bind_ip=bind_ip
+    )
+    return online, message
+
+
+def default_login_once(app_ctx):
+    cfg = app_ctx["cfg"]
+    runtime = app_ctx["runtime"]
+    urls = runtime.build_urls(cfg["base_url"])
     bip = resolve_bind_ip(urls["init_url"], cfg)
     ip = init_getip(urls["init_url"], bind_ip=bip)
     token, ip = get_token(urls["get_challenge_api"], cfg["username"], ip, bind_ip=bip)
-    i_value, hmd5, chksum = profile.do_complex_work(cfg, ip, token)
+    i_value, hmd5, chksum = runtime.do_complex_work(cfg, ip, token)
     ok, message = login(
-        profile, urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum, bind_ip=bip
+        runtime, urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum, bind_ip=bip
     )
 
-    # challenge 过期重试（协议层面，不算业务重试）
     if (not ok) and ("challenge_expire_error" in message.lower()):
         token, ip = get_token(
             urls["get_challenge_api"], cfg["username"], ip, bind_ip=bip
         )
-        i_value, hmd5, chksum = profile.do_complex_work(cfg, ip, token)
+        i_value, hmd5, chksum = runtime.do_complex_work(cfg, ip, token)
         ok, message = login(
-            profile,
+            runtime,
             urls["srun_portal_api"],
             cfg,
             ip,
@@ -167,11 +199,10 @@ def run_once(cfg):
             bind_ip=bip,
         )
 
-    # no_response_data 兜底：查一次在线状态
     if (not ok) and ("no_response_data_error" in message.lower()):
         try:
-            online, online_msg = query_online_status(
-                profile, urls["rad_user_info_api"], cfg["username"], bind_ip=bip
+            online, online_msg = default_query_online_status(
+                app_ctx, expected_username=cfg["username"], bind_ip=bip
             )
             if online:
                 return True, "已在线"
@@ -184,9 +215,38 @@ def run_once(cfg):
     return False, "登录失败: " + localize_error(message)
 
 
+def run_logout_once(cfg, override_user_id=None, app_ctx=None, bind_ip=None):
+    app_ctx = ensure_app_context(app_ctx or cfg)
+    return app_ctx["runtime"].logout_once(
+        app_ctx, override_user_id=override_user_id, bind_ip=bind_ip
+    )
+
+
+def default_logout_once(app_ctx, override_user_id=None, bind_ip=None):
+    cfg = app_ctx["cfg"]
+    runtime = app_ctx["runtime"]
+    urls = runtime.build_urls(cfg["base_url"])
+    bip = bind_ip or resolve_bind_ip(urls["init_url"], cfg)
+    logout_cfg = dict(cfg)
+    logout_user = str(override_user_id or "").strip()
+    if logout_user:
+        logout_cfg["user_id"] = logout_user
+        logout_cfg["username"] = logout_user
+    ip = init_getip(urls["init_url"], bind_ip=bip)
+    return logout(runtime, urls["rad_user_dm_api"], logout_cfg, ip, bind_ip=bip)
+
+
+def run_once(cfg):
+    """纯认证流程：challenge -> 加密 -> login API。
+    不管 WiFi、不管 quiet hours、不管重试。"""
+    app_ctx = ensure_app_context(cfg)
+    return app_ctx["runtime"].login_once(app_ctx)
+
+
 def run_once_safe(cfg):
+    app_ctx = ensure_app_context(cfg)
     try:
-        return run_once(cfg)
+        return run_once(app_ctx)
     except HTTP_EXCEPTIONS as exc:
         return False, "网络错误: " + localize_error(exc)
     except ValueError as exc:
