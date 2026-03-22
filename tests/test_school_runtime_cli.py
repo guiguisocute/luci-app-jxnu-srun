@@ -399,6 +399,21 @@ class HotUpdateScriptTests(unittest.TestCase):
 
         self.assertEqual(hot_update.ROUTER_HOST, "10.0.0.1")
 
+    def test_hot_update_has_no_default_router_password(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            hot_update = load_hot_update_module(self)
+
+        self.assertIsNone(hot_update.ROUTER_PASSWORD)
+
+    def test_hot_update_requires_password_from_environment(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            hot_update = load_hot_update_module(self)
+
+        with self.assertRaises(RuntimeError) as exc:
+            hot_update.require_router_password()
+
+        self.assertIn("JXSRUN_ROUTER_PASSWORD", str(exc.exception))
+
     def test_hot_update_uploads_runtime_payload_dependency_closure(self):
         hot_update = load_hot_update_module(self)
 

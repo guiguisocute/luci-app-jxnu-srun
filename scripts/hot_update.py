@@ -15,7 +15,7 @@ from urllib import parse, request
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROUTER_HOST = os.environ.get("JXSRUN_ROUTER_HOST", "10.0.0.1")
 ROUTER_USER = os.environ.get("JXSRUN_ROUTER_USER", "root")
-ROUTER_PASSWORD = os.environ.get("JXSRUN_ROUTER_PASSWORD", "ZENGjiaxuan200!@#$")
+ROUTER_PASSWORD = os.environ.get("JXSRUN_ROUTER_PASSWORD")
 LUCI_BASE_URL = os.environ.get(
     "JXSRUN_LUCI_BASE_URL", "http://%s/cgi-bin/luci" % ROUTER_HOST
 )
@@ -134,6 +134,14 @@ def build_remote_commands():
     }
 
 
+def require_router_password():
+    if ROUTER_PASSWORD:
+        return ROUTER_PASSWORD
+    raise RuntimeError(
+        "JXSRUN_ROUTER_PASSWORD is required; export it in the environment before running hot_update.py"
+    )
+
+
 def load_paramiko():
     try:
         import paramiko
@@ -236,10 +244,11 @@ def open_url(opener, url, data=None, timeout=10, allow_statuses=()):
 def login_luci(opener):
     login_url = LUCI_BASE_URL + "/"
     open_url(opener, login_url, timeout=10, allow_statuses=(403,))
+    password = require_router_password()
     payload = parse.urlencode(
         {
             "luci_username": ROUTER_USER,
-            "luci_password": ROUTER_PASSWORD,
+            "luci_password": password,
         }
     ).encode("utf-8")
     _, body, _ = open_url(opener, login_url, data=payload, timeout=10)
@@ -289,6 +298,7 @@ def parse_selected_runtime_metadata(inspect_output):
 
 def main():
     ensure_local_files()
+    password = require_router_password()
     paramiko = load_paramiko()
     commands = build_remote_commands()
 
@@ -298,7 +308,7 @@ def main():
     ssh.connect(
         ROUTER_HOST,
         username=ROUTER_USER,
-        password=ROUTER_PASSWORD,
+        password=password,
         look_for_keys=False,
         allow_agent=False,
         timeout=10,
