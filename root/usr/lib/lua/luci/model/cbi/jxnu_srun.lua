@@ -26,6 +26,14 @@ local POINTER_KEYS = {
 }
 -- 列表字段名
 local LIST_KEYS = { "campus_accounts", "hotspot_profiles" }
+local SUPPORTED_SCHOOL_EXTRA_TYPES = {
+    string = true,
+    bool = true,
+    int = true,
+    enum = true,
+}
+local cfg
+local changed = false
 -- 标量默认值
 local SCALAR_DEFAULTS = {
     enabled = "0", quiet_hours_enabled = "1",
@@ -135,6 +143,7 @@ local function load_cfg()
     for _, key in ipairs(LIST_KEYS) do
         cfg[key] = type(parsed[key]) == "table" and parsed[key] or {}
     end
+    cfg.school_extra = type(parsed.school_extra) == "table" and parsed.school_extra or {}
     return cfg
 end
 
@@ -149,6 +158,7 @@ local function save_cfg(cfg)
     for _, key in ipairs(LIST_KEYS) do
         out[key] = type(cfg[key]) == "table" and cfg[key] or {}
     end
+    out.school_extra = type(cfg.school_extra) == "table" and cfg.school_extra or {}
     ensure_json_file()
     fs.writefile(CONFIG_FILE, (jsonc.stringify(out) or "{}") .. "\n")
 end
@@ -467,15 +477,219 @@ local function render_school_info_html(schools, current_school)
         helper_spacing)
 end
 
-local cfg = load_cfg()
-local changed = false
+local function ensure_school_extra_table()
+    if type(cfg.school_extra) ~= "table" then
+        cfg.school_extra = {}
+    end
+    return cfg.school_extra
+end
+
+local function set_school_extra_value(key, value)
+    local school_extra = ensure_school_extra_table()
+    local normalized = tostring(value or "")
+    if school_extra[key] ~= normalized then
+        school_extra[key] = normalized
+        changed = true
+    end
+end
+
+local function remove_school_extra_value(key)
+    local school_extra = ensure_school_extra_table()
+    if school_extra[key] ~= nil then
+        school_extra[key] = nil
+        changed = true
+    end
+end
+
+local function get_school_extra_value(key, default_value)
+    local school_extra = ensure_school_extra_table()
+    local value = school_extra[key]
+    if value == nil or tostring(value) == "" then
+        return tostring(default_value or "")
+    end
+    return tostring(value)
+end
+
+local function normalize_school_runtime_descriptor(descriptor)
+    if type(descriptor) ~= "table" then
+        return nil
+    end
+
+    local key = util.trim(tostring(descriptor.key or ""))
+    if key == "" then
+        return nil
+    end
+
+    local value_type = util.trim(tostring(descriptor.type or "string")):lower()
+    local item = {
+        key = key,
+        type = value_type ~= "" and value_type or "string",
+        label = util.trim(tostring(descriptor.label or key)),
+        description = tostring(descriptor.description or ""),
+        required = descriptor.required == true,
+        default = descriptor.default ~= nil and tostring(descriptor.default) or "",
+        choices = {},
+    }
+
+    if type(descriptor.choices) == "table" then
+        for _, choice in ipairs(descriptor.choices) do
+            item.choices[#item.choices + 1] = tostring(choice)
+        end
+    end
+
+    if item.label == "" then
+        item.label = key
+    end
+    return item
+end
+
+local function parse_school_runtime_contract(raw_json, err)
+    local diagnostics = {}
+    local parsed = jsonc.parse(raw_json or "")
+    if err then
+        diagnostics[#diagnostics + 1] = err
+    end
+    if type(parsed) ~= "table" then
+        if raw_json and util.trim(raw_json) ~= "" then
+            diagnostics[#diagnostics + 1] = "运行时检查 JSON 解析失败：" .. last_nonempty_line(raw_json)
+        else
+            diagnostics[#diagnostics + 1] = "运行时检查未返回有效 JSON。"
+        end
+        parsed = {}
+    end
+    return parsed, diagnostics
+end
+
+local function render_school_runtime_diagnostics_html(contract, diagnostics)
+    local info_lines = {}
+    local notes = {}
+    local capabilities = {}
+
+    if type(contract.capabilities) == "table" then
+        for _, item in ipairs(contract.capabilities) do
+            capabilities[#capabilities + 1] = tostring(item)
+        end
+    end
+
+    info_lines[#info_lines + 1] = string.format(
+        "<div><strong>运行时模式：</strong>%s</div>",
+        util.pcdata(tostring(contract.runtime_type or "unknown"))
+    )
+    info_lines[#info_lines + 1] = string.format(
+        "<div><strong>API 版本：</strong>%s</div>",
+        util.pcdata(tostring(contract.runtime_api_version or "unknown"))
+    )
+    info_lines[#info_lines + 1] = string.format(
+        "<div><strong>能力覆盖：</strong>%s</div>",
+        util.pcdata(#capabilities > 0 and table.concat(capabilities, ", ") or "无")
+    )
+
+    for _, item in ipairs(diagnostics or {}) do
+        notes[#notes + 1] = "<li>" .. util.pcdata(tostring(item)) .. "</li>"
+    end
+
+    return string.format([[
+<div class="cbi-value-description" style="display:block;line-height:1.6;">
+  <div><strong>runtime diagnostics</strong></div>
+  %s
+  <ul style="margin:.5em 0 0 1.2em;">%s</ul>
+</div>
+]], table.concat(info_lines, ""), #notes > 0 and table.concat(notes, "") or "<li>当前已按已保存学校加载；切换学校后请保存并刷新页面以重新生成动态字段。</li>")
+end
+
+local function bind_school_extra_flag(opt, descriptor, school_changed_ref)
+    opt.rmempty = false
+    function opt.cfgvalue()
+        return get_school_extra_value(descriptor.key, descriptor.default) == "1" and "1" or "0"
+    end
+    function opt.write(self, section, value)
+        if school_changed_ref() then
+            return
+        end
+        set_school_extra_value(descriptor.key, value == "1" and "1" or "0")
+    end
+    function opt.remove(self, section)
+        if school_changed_ref() then
+            return
+        end
+        set_school_extra_value(descriptor.key, "0")
+    end
+end
+
+local function bind_school_extra_text(opt, descriptor, school_changed_ref, normalize_fn)
+    opt.rmempty = not descriptor.required
+    function opt.cfgvalue()
+        return get_school_extra_value(descriptor.key, descriptor.default)
+    end
+    function opt.write(self, section, value)
+        if school_changed_ref() then
+            return
+        end
+        local raw = util.trim(value or "")
+        if raw == "" and not descriptor.required then
+            remove_school_extra_value(descriptor.key)
+            return
+        end
+        if normalize_fn then
+            local normalized = normalize_fn(raw)
+            if normalized == nil then
+                return
+            end
+            set_school_extra_value(descriptor.key, normalized)
+            return
+        end
+        set_school_extra_value(descriptor.key, raw)
+    end
+    function opt.remove(self, section)
+        if school_changed_ref() then
+            return
+        end
+        if descriptor.required then
+            return
+        end
+        remove_school_extra_value(descriptor.key)
+    end
+end
+
+cfg = load_cfg()
+changed = false
 
 -- 加载学校 Profile 列表
-local schools_json = util.trim(sys.exec(
-    find_python() .. " -B /usr/lib/jxnu_srun/client.py schools 2>/dev/null"
-) or "")
+local schools_json = select(1, run_client("schools", false)) or ""
 local schools = jsonc.parse(schools_json)
 if type(schools) ~= "table" then schools = {} end
+
+local school_runtime_json, school_runtime_err = run_client("schools inspect --selected", true)
+local school_runtime_contract, school_runtime_diagnostics = parse_school_runtime_contract(
+    school_runtime_json,
+    school_runtime_err
+)
+local school_runtime_descriptors = {}
+local school_runtime_renderable = type(school_runtime_contract.field_descriptors) == "table"
+    and type(school_runtime_contract.school_extra) == "table"
+
+if type(school_runtime_contract.field_descriptors) ~= "table" then
+    school_runtime_diagnostics[#school_runtime_diagnostics + 1] = "运行时未提供 field_descriptors，已禁用动态字段渲染。"
+end
+if type(school_runtime_contract.school_extra) ~= "table" then
+    school_runtime_diagnostics[#school_runtime_diagnostics + 1] = "运行时未提供 school_extra，已禁用动态字段渲染。"
+end
+if school_runtime_renderable then
+    for _, descriptor in ipairs(school_runtime_contract.field_descriptors) do
+        local item = normalize_school_runtime_descriptor(descriptor)
+        if item then
+            if SUPPORTED_SCHOOL_EXTRA_TYPES[item.type] then
+                school_runtime_descriptors[#school_runtime_descriptors + 1] = item
+            else
+                school_runtime_diagnostics[#school_runtime_diagnostics + 1] = string.format(
+                    "字段 %s 使用了暂不支持的类型 %s；当前仅显示诊断信息。",
+                    item.label,
+                    item.type
+                )
+            end
+        end
+    end
+end
 
 local function set_value(key, value)
     local v = tostring(value or "")
@@ -483,6 +697,12 @@ local function set_value(key, value)
         cfg[key] = v
         changed = true
     end
+end
+
+local school_changed_during_parse = false
+
+local function school_extra_write_blocked()
+    return school_changed_during_parse
 end
 
 local function bind_flag(opt, key)
@@ -632,9 +852,80 @@ function school.cfgvalue()
     return cfg.school or "jxnu"
 end
 function school.write(self, section, value)
-    set_value("school", util.trim(value or "jxnu"))
+    local next_school = util.trim(value or "jxnu")
+    if next_school == "" then
+        next_school = "jxnu"
+    end
+    if next_school ~= (cfg.school or "jxnu") then
+        school_changed_during_parse = true
+        cfg.school_extra = {}
+        changed = true
+    end
+    set_value("school", next_school)
 end
 school.description = render_school_info_html(schools, cfg.school or "jxnu")
+
+-- runtime diagnostics
+school_runtime_diag = s:taboption("basic", DummyValue, "_school_runtime_diagnostics", "学校运行时诊断")
+school_runtime_diag.rawhtml = true
+function school_runtime_diag.cfgvalue()
+    return render_school_runtime_diagnostics_html(
+        school_runtime_contract,
+        school_runtime_diagnostics
+    )
+end
+
+if school_runtime_renderable then
+    for idx, descriptor in ipairs(school_runtime_descriptors) do
+        local option_name = "_school_extra_" .. idx .. "_" .. descriptor.key:gsub("[^%w_]", "_")
+        local label = descriptor.label
+        local description = descriptor.description
+        if descriptor.type == "bool" then
+            local opt = s:taboption("basic", Flag, option_name, label, description)
+            bind_school_extra_flag(opt, descriptor, school_extra_write_blocked)
+        elseif descriptor.type == "enum" then
+            local opt = s:taboption("basic", ListValue, option_name, label, description)
+            for _, choice in ipairs(descriptor.choices or {}) do
+                opt:value(choice, choice)
+            end
+            bind_school_extra_text(opt, descriptor, school_extra_write_blocked, function(raw)
+                if raw == "" and not descriptor.required then
+                    return ""
+                end
+                for _, choice in ipairs(descriptor.choices or {}) do
+                    if raw == choice then
+                        return raw
+                    end
+                end
+                return nil
+            end)
+        elseif descriptor.type == "int" then
+            local opt = s:taboption("basic", Value, option_name, label, description)
+            function opt.validate(self, value)
+                local raw = util.trim(value or "")
+                if raw == "" and not descriptor.required then
+                    return raw
+                end
+                if raw:match("^-?%d+$") then
+                    return raw
+                end
+                return nil, "该字段必须是整数"
+            end
+            bind_school_extra_text(opt, descriptor, school_extra_write_blocked, function(raw)
+                if raw == "" and not descriptor.required then
+                    return ""
+                end
+                if raw:match("^-?%d+$") then
+                    return tostring(tonumber(raw))
+                end
+                return nil
+            end)
+        else
+            local opt = s:taboption("basic", Value, option_name, label, description)
+            bind_school_extra_text(opt, descriptor, school_extra_write_blocked)
+        end
+    end
+end
 
 manual_login = s:taboption("basic", DummyValue, "_manual_login", "手动登录")
 manual_login.rawhtml = true

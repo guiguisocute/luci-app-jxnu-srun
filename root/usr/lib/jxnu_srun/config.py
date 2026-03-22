@@ -465,6 +465,39 @@ def _normalize_declared_school_extra(cfg):
     return normalize_school_extra(cfg, _get_school_extra_descriptors(cfg))
 
 
+def build_school_runtime_luci_contract(cfg, inspection=None):
+    raw_inspection = inspection if isinstance(inspection, dict) else {}
+    result = dict(raw_inspection)
+
+    capabilities = raw_inspection.get("capabilities")
+    if not isinstance(capabilities, list):
+        capabilities = raw_inspection.get("declared_capabilities")
+    if not isinstance(capabilities, list):
+        capabilities = []
+
+    descriptors = raw_inspection.get("field_descriptors")
+    if not isinstance(descriptors, list):
+        descriptors = raw_inspection.get("school_extra")
+    if not isinstance(descriptors, list):
+        descriptors = raw_inspection.get("school_extra_descriptors")
+    descriptors = (
+        _normalize_school_extra_descriptors(descriptors)
+        if isinstance(descriptors, list)
+        else None
+    )
+
+    school_extra = None
+    if descriptors is not None:
+        school_extra = normalize_school_extra(cfg or {}, descriptors)
+
+    result["runtime_type"] = str(raw_inspection.get("runtime_type") or "unknown")
+    result["runtime_api_version"] = raw_inspection.get("runtime_api_version", 1)
+    result["capabilities"] = [str(item) for item in capabilities]
+    result["field_descriptors"] = descriptors if descriptors is not None else None
+    result["school_extra"] = school_extra if school_extra is not None else None
+    return result
+
+
 def _get_school_metadata(cfg):
     school_key = str((cfg or {}).get("school", "jxnu")).strip() or "jxnu"
     try:

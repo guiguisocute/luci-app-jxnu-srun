@@ -9,6 +9,7 @@ import time
 from config import (
     LOG_FILE,
     append_log,
+    build_school_runtime_luci_contract,
     log,
     campus_uses_wired,
     failover_enabled,
@@ -1210,9 +1211,14 @@ def main():
         if getattr(args, "schools_command", "") == "inspect" and getattr(
             args, "selected", False
         ):
+            inspect_payload = build_school_runtime_luci_contract(
+                cfg, school_runtime.inspect_runtime(cfg)
+            )
             print(
                 _json.dumps(
-                    school_runtime.inspect_runtime(cfg), ensure_ascii=False, indent=2
+                    inspect_payload,
+                    ensure_ascii=False,
+                    indent=2,
                 )
             )
             return
