@@ -60,7 +60,7 @@ define Package/luci-app-jxnu-srun
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI interface for JXNU SRun
-  DEPENDS:=+jxnu-srun luci-base
+  DEPENDS:=+jxnu-srun
   PKGARCH:=all
 endef
 
