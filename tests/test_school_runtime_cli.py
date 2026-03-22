@@ -38,6 +38,26 @@ class FakeRuntime(object):
         print("STATUS:%s" % app_ctx["cfg"].get("school", "default"))
         return True, 0, ""
 
+    def cli_login(self, app_ctx, args):
+        self.calls.append(("cli_login", args.command))
+        return True, 0, "runtime-cli-login"
+
+    def cli_logout(self, app_ctx, args):
+        self.calls.append(("cli_logout", args.command))
+        return True, 0, "runtime-cli-logout"
+
+    def cli_relogin(self, app_ctx, args):
+        self.calls.append(("cli_relogin", args.command))
+        return True, 0, "runtime-cli-relogin"
+
+    def cli_daemon(self, app_ctx, args):
+        self.calls.append(("cli_daemon", args.command))
+        return True, 0, "runtime-cli-daemon"
+
+    def status(self, app_ctx):
+        self.calls.append(("status", app_ctx["cfg"].get("school")))
+        return True, "runtime-status"
+
     def daemon_before_tick(self, app_ctx, state, interval):
         self.calls.append(("daemon_before_tick", interval))
         return self.daemon_result
@@ -76,10 +96,8 @@ class SchoolRuntimeCliTests(unittest.TestCase):
         self.assertEqual(bare_code, 0)
         self.assertEqual(status_code, 0)
         self.assertEqual(bare_output, status_output)
-        self.assertEqual(
-            self.runtime.calls,
-            [("cli_status", None), ("cli_status", "status")],
-        )
+        self.assertIn(("status", "custom"), self.runtime.calls)
+        self.assertNotIn(("cli_status", "status"), self.runtime.calls)
 
     def test_schools_list_keeps_metadata_shape(self):
         payload = [
@@ -166,6 +184,47 @@ class SchoolRuntimeCliTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "daemon contract"):
             daemon._run_runtime_daemon_hook(self.app_ctx, {"was_online": False}, 30)
+
+    def test_reserved_status_command_ignores_runtime_cli_hook(self):
+        with mock.patch.object(daemon, "_show_status") as show_status:
+            code, output = self.run_main(["status"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "")
+        show_status.assert_called_once_with(self.cfg)
+        self.assertNotIn(("cli_status", "status"), self.runtime.calls)
+
+    def test_reserved_login_logout_relogin_commands_ignore_runtime_cli_hooks(self):
+        with (
+            mock.patch.object(
+                daemon, "_runtime_cli_login", return_value=(True, 0, "core-login")
+            ),
+            mock.patch.object(
+                daemon, "_runtime_cli_logout", return_value=(True, 0, "core-logout")
+            ),
+            mock.patch.object(
+                daemon, "_runtime_cli_relogin", return_value=(True, 0, "core-relogin")
+            ),
+        ):
+            login_code, login_output = self.run_main(["login"])
+            logout_code, logout_output = self.run_main(["logout"])
+            relogin_code, relogin_output = self.run_main(["relogin"])
+
+        self.assertEqual((login_code, login_output.strip()), (0, "core-login"))
+        self.assertEqual((logout_code, logout_output.strip()), (0, "core-logout"))
+        self.assertEqual((relogin_code, relogin_output.strip()), (0, "core-relogin"))
+        self.assertNotIn(("cli_login", "login"), self.runtime.calls)
+        self.assertNotIn(("cli_logout", "logout"), self.runtime.calls)
+        self.assertNotIn(("cli_relogin", "relogin"), self.runtime.calls)
+
+    def test_reserved_daemon_command_ignores_runtime_cli_hook(self):
+        with mock.patch.object(daemon, "run_daemon") as run_daemon:
+            code, output = self.run_main(["daemon"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "")
+        run_daemon.assert_called_once_with(runtime=self.runtime)
+        self.assertNotIn(("cli_daemon", "daemon"), self.runtime.calls)
 
 
 if __name__ == "__main__":

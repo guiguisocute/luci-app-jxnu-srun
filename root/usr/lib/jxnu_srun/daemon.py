@@ -1155,40 +1155,28 @@ def main():
 
     # No command → show status
     if not args.command:
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_status", app_ctx, args)
-        )
+        _show_status(cfg)
         return
 
     # --- dispatch ---
     if args.command == "status":
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_status", app_ctx, args)
-        )
+        _show_status(cfg)
         return
 
     if args.command == "login":
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_login", app_ctx, args)
-        )
+        _emit_cli_result(_runtime_cli_login(app_ctx))
         return
 
     if args.command == "logout":
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_logout", app_ctx, args)
-        )
+        _emit_cli_result(_runtime_cli_logout(app_ctx))
         return
 
     if args.command == "relogin":
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_relogin", app_ctx, args)
-        )
+        _emit_cli_result(_runtime_cli_relogin(app_ctx))
         return
 
     if args.command == "daemon":
-        _emit_cli_result(
-            school_runtime.dispatch_cli_hook(runtime, "cli_daemon", app_ctx, args)
-        )
+        run_daemon(runtime=runtime)
         return
 
     if args.command == "log":
