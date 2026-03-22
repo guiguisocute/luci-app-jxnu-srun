@@ -14,7 +14,7 @@ define Package/jxnu-srun
   SECTION:=net
   CATEGORY:=Network
   TITLE:=JXNU SRun campus network client (CLI/TUI)
-  DEPENDS:=+python3-light
+  DEPENDS:=python3-light
   PKGARCH:=all
 endef
 
