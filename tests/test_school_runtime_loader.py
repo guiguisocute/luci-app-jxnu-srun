@@ -21,6 +21,13 @@ def load_school_runtime_module(test_case):
         test_case.fail("school_runtime module missing")
 
 
+def load_srun_auth_module(test_case):
+    try:
+        return importlib.import_module("srun_auth")
+    except ImportError:
+        test_case.fail("srun_auth module missing")
+
+
 class TemporarySchoolModule:
     def __init__(self, name, source):
         self.name = name
@@ -43,7 +50,7 @@ class TemporarySchoolModule:
 
 class SchoolRuntimeLoaderTests(unittest.TestCase):
     def tearDown(self):
-        for name in ["schools", "school_runtime"]:
+        for name in ["schools", "school_runtime", "srun_auth"]:
             if name in sys.modules:
                 importlib.reload(sys.modules[name])
 
@@ -189,6 +196,12 @@ class SchoolRuntimeLoaderTests(unittest.TestCase):
 
         self.assertIsInstance(default_runtime, school_runtime.DefaultRuntime)
         self.assertIsInstance(explicit_default, school_runtime.DefaultRuntime)
+
+    def test_srun_auth_get_profile_rejects_invalid_explicit_school(self):
+        srun_auth = load_srun_auth_module(self)
+
+        with self.assertRaises(LookupError):
+            srun_auth.get_profile({"school": "missing-school"})
 
     def test_inspect_runtime_exposes_runtime_contract_details(self):
         school_runtime = load_school_runtime_module(self)

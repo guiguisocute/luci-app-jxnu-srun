@@ -21,16 +21,21 @@ from network import (
 
 def get_profile(cfg):
     """根据 cfg 中的 school 字段获取 profile 实例，找不到则使用默认"""
+    short = str((cfg or {}).get("school", "")).strip()
     try:
         import schools
-        short = str(cfg.get("school", "")).strip()
+
         if short:
             p = schools.get_profile(short)
             if p:
                 return p
+            raise LookupError("unknown school runtime: %s" % short)
         return schools.get_default_profile()
+    except LookupError:
+        raise
     except Exception:
         from schools._base import SchoolProfile
+
         return SchoolProfile()
 
 
@@ -44,7 +49,6 @@ def get_logout_username(cfg):
 # ---------------------------------------------------------------------------
 # 基础 API 调用
 # ---------------------------------------------------------------------------
-
 def init_getip(init_url, bind_ip=None):
     text = http_get(init_url, timeout=5, bind_ip=bind_ip)
     ip = extract_ip_from_text(text)
@@ -128,7 +132,6 @@ def wait_for_logout_status(
 # ---------------------------------------------------------------------------
 # 核心登录流程（纯认证，不管 WiFi）
 # ---------------------------------------------------------------------------
-
 def build_urls(cfg):
     profile = get_profile(cfg)
     return profile.build_urls(cfg["base_url"])
@@ -154,7 +157,14 @@ def run_once(cfg):
         )
         i_value, hmd5, chksum = profile.do_complex_work(cfg, ip, token)
         ok, message = login(
-            profile, urls["srun_portal_api"], cfg, ip, i_value, hmd5, chksum, bind_ip=bip
+            profile,
+            urls["srun_portal_api"],
+            cfg,
+            ip,
+            i_value,
+            hmd5,
+            chksum,
+            bind_ip=bip,
         )
 
     # no_response_data 兜底：查一次在线状态
