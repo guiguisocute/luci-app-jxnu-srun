@@ -64,6 +64,8 @@ POINTER_KEYS = {
 
 LIST_KEYS = {"campus_accounts", "hotspot_profiles"}
 
+SCHOOL_EXTRA_KEY = "school_extra"
+
 LEGACY_CAMPUS_KEYS = {
     "user_id",
     "operator",
@@ -153,6 +155,7 @@ DEFAULTS = _load_defaults()
 # 文件 I/O 工具
 # ---------------------------------------------------------------------------
 
+
 def ensure_parent_dir(path):
     parent = os.path.dirname(str(path or ""))
     if parent:
@@ -211,6 +214,7 @@ def save_json_raw_config(raw_cfg):
     for key in LIST_KEYS:
         val = raw_cfg.get(key)
         payload[key] = val if isinstance(val, list) else []
+    payload[SCHOOL_EXTRA_KEY] = load_school_extra(raw_cfg)
 
     ensure_parent_dir(JSON_CONFIG_FILE)
     tmp_path = JSON_CONFIG_FILE + ".tmp"
@@ -223,6 +227,7 @@ def save_json_raw_config(raw_cfg):
 # ---------------------------------------------------------------------------
 # 日志
 # ---------------------------------------------------------------------------
+
 
 def log(level, event, msg="", **ctx):
     """
@@ -247,10 +252,13 @@ def log(level, event, msg="", **ctx):
 
 def append_log(line):
     """Legacy compat wrapper. New code should use log()."""
-    _write_log("[%s] %s" % (
-        datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-        str(line).strip(),
-    ))
+    _write_log(
+        "[%s] %s"
+        % (
+            datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+            str(line).strip(),
+        )
+    )
 
 
 def _write_log(log_line):
@@ -260,7 +268,7 @@ def _write_log(log_line):
         if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > LOG_MAX_BYTES:
             with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as rf:
                 content = rf.read()
-            keep = content[-(LOG_MAX_BYTES // 2):]
+            keep = content[-(LOG_MAX_BYTES // 2) :]
             with open(LOG_FILE, "w", encoding="utf-8") as wf:
                 wf.write(keep)
 
@@ -273,6 +281,7 @@ def _write_log(log_line):
 # ---------------------------------------------------------------------------
 # 配置标量查询 / 修改
 # ---------------------------------------------------------------------------
+
 
 def get_json_scalar_config(key, default_value=""):
     raw = load_json_raw_config()
@@ -292,9 +301,164 @@ def _state_flag_enabled(value):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def load_school_extra(raw_cfg):
+    payload = {}
+    if isinstance(raw_cfg, dict):
+        payload = raw_cfg.get(SCHOOL_EXTRA_KEY)
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _normalize_school_extra_descriptor(descriptor):
+    if not isinstance(descriptor, dict):
+        return None
+
+    key = str(descriptor.get("key", "")).strip()
+    if not key:
+        return None
+
+    label = str(descriptor.get("label") or key).strip() or key
+    choices = descriptor.get("choices")
+    return {
+        "key": key,
+        "type": str(descriptor.get("type") or "string").strip().lower() or "string",
+        "default": descriptor.get("default", ""),
+        "required": bool(descriptor.get("required", False)),
+        "label": label,
+        "description": str(descriptor.get("description") or ""),
+        "choices": [str(choice) for choice in choices]
+        if isinstance(choices, list)
+        else [],
+        "secret": bool(descriptor.get("secret", False)),
+    }
+
+
+def _normalize_school_extra_descriptors(descriptors):
+    items = []
+    if not isinstance(descriptors, list):
+        return items
+    for descriptor in descriptors:
+        item = _normalize_school_extra_descriptor(descriptor)
+        if item:
+            items.append(item)
+    return items
+
+
+def _coerce_school_extra_value(value, descriptor):
+    value_type = descriptor.get("type", "string")
+    text = str(value or "").strip()
+
+    if value_type == "bool":
+        lowered = text.lower()
+        if lowered in ("1", "true", "yes", "on"):
+            return "1"
+        if lowered in ("", "0", "false", "no", "off"):
+            return "0"
+        return text
+
+    if value_type == "int":
+        return str(int(text))
+
+    if value_type == "float":
+        return str(float(text))
+
+    return text
+
+
+def validate_school_extra(raw_cfg, descriptors):
+    payload = load_school_extra(raw_cfg)
+    errors = []
+
+    for descriptor in _normalize_school_extra_descriptors(descriptors):
+        key = descriptor["key"]
+        label = descriptor["label"]
+        text = str(payload.get(key, "") or "").strip()
+
+        if descriptor["required"] and not text:
+            errors.append({"key": key, "message": "%s is required." % label})
+            continue
+
+        if not text:
+            continue
+
+        choices = descriptor.get("choices", [])
+        if choices and text not in choices:
+            errors.append(
+                {
+                    "key": key,
+                    "message": "%s must be one of: %s." % (label, ", ".join(choices)),
+                }
+            )
+            continue
+
+        value_type = descriptor.get("type", "string")
+        if value_type == "int":
+            try:
+                int(text)
+            except Exception:
+                errors.append({"key": key, "message": "%s must be an integer." % label})
+        elif value_type == "float":
+            try:
+                float(text)
+            except Exception:
+                errors.append({"key": key, "message": "%s must be a number." % label})
+        elif value_type == "bool":
+            if text.lower() not in (
+                "1",
+                "0",
+                "true",
+                "false",
+                "yes",
+                "no",
+                "on",
+                "off",
+            ):
+                errors.append(
+                    {"key": key, "message": "%s must be true or false." % label}
+                )
+
+    return len(errors) == 0, errors
+
+
+def normalize_school_extra(raw_cfg, descriptors):
+    payload = load_school_extra(raw_cfg)
+    if not payload:
+        return {}
+
+    ok, _ = validate_school_extra({SCHOOL_EXTRA_KEY: payload}, descriptors)
+    if not ok:
+        return {}
+
+    normalized = {}
+    for descriptor in _normalize_school_extra_descriptors(descriptors):
+        key = descriptor["key"]
+        if key not in payload:
+            continue
+        try:
+            value = _coerce_school_extra_value(payload.get(key), descriptor)
+        except Exception:
+            return {}
+        if value != "":
+            normalized[key] = value
+    return normalized
+
+
+def _get_school_metadata(cfg):
+    school_key = str((cfg or {}).get("school", "jxnu")).strip() or "jxnu"
+    try:
+        import schools
+
+        metadata = schools.get_school_metadata(school_key)
+        if metadata:
+            return metadata
+        return schools.get_default_school_metadata()
+    except Exception:
+        return {"short_name": school_key, "no_suffix_operators": ["xn"]}
+
+
 # ---------------------------------------------------------------------------
 # 手动登录服务保护
 # ---------------------------------------------------------------------------
+
 
 def begin_manual_login_service_guard():
     previous_enabled = get_json_scalar_config("enabled", DEFAULTS.get("enabled", "0"))
@@ -337,13 +501,19 @@ def reconcile_manual_login_service_guard():
 
     restored, previous_enabled = restore_manual_login_service_guard()
     if restored and previous_enabled == "1":
-        log("INFO", "config_legacy_fix", "restored manual login service guard", previous_enabled=previous_enabled)
+        log(
+            "INFO",
+            "config_legacy_fix",
+            "restored manual login service guard",
+            previous_enabled=previous_enabled,
+        )
     return restored
 
 
 # ---------------------------------------------------------------------------
 # Runtime state (读写 state.json)
 # ---------------------------------------------------------------------------
+
 
 def load_runtime_state():
     data = load_json_file(STATE_FILE)
@@ -369,6 +539,7 @@ def save_runtime_status(message, state=None, **extra):
 # Runtime action queue (读写 action.json)
 # ---------------------------------------------------------------------------
 
+
 def queue_runtime_action(action):
     payload = {
         "action": str(action or "").strip(),
@@ -390,6 +561,7 @@ def pop_runtime_action():
 # 数值解析
 # ---------------------------------------------------------------------------
 
+
 def parse_non_negative_int(value, default_value):
     try:
         parsed = int(str(value).strip())
@@ -410,6 +582,7 @@ def parse_non_negative_float(value, default_value):
 # 指针 / 列表项操作
 # ---------------------------------------------------------------------------
 
+
 def _find_item_by_id(items, target_id):
     for item in items:
         if isinstance(item, dict) and str(item.get("id", "")) == target_id:
@@ -423,7 +596,7 @@ def _next_id(items, prefix):
         item_id = str(item.get("id", ""))
         if item_id.startswith(prefix + "-"):
             try:
-                num = int(item_id[len(prefix) + 1:])
+                num = int(item_id[len(prefix) + 1 :])
                 if num > max_num:
                     max_num = num
             except ValueError:
@@ -506,16 +679,22 @@ def apply_default_selection_for_runtime(expect_hotspot, reason=""):
     suffix = ""
     if reason:
         suffix = "（%s）" % str(reason).strip()
-    log("INFO", "config_default_applied",
+    log(
+        "INFO",
+        "config_default_applied",
         "applied default %s to runtime" % meta["label"],
-        kind=meta["label"], old=active_id or "unset", new=default_id,
-        reason=str(reason or ""))
+        kind=meta["label"],
+        old=active_id or "unset",
+        new=default_id,
+        reason=str(reason or ""),
+    )
     return load_config(), True, default_id
 
 
 # ---------------------------------------------------------------------------
 # 旧版配置迁移
 # ---------------------------------------------------------------------------
+
 
 def _is_legacy_config(raw):
     if "campus_accounts" in raw and isinstance(raw["campus_accounts"], list):
@@ -524,7 +703,6 @@ def _is_legacy_config(raw):
 
 
 def _migrate_legacy_config(raw):
-
     migrated = {}
     for key in GLOBAL_SCALAR_KEYS:
         if key in raw:
@@ -580,12 +758,14 @@ def _migrate_legacy_config(raw):
     else:
         migrated["active_hotspot_id"] = ""
         migrated["default_hotspot_id"] = ""
+    migrated[SCHOOL_EXTRA_KEY] = {}
     return migrated
 
 
 # ---------------------------------------------------------------------------
 # 活跃账号 / 热点解析
 # ---------------------------------------------------------------------------
+
 
 def get_active_campus_account(cfg):
     accounts = cfg.get("campus_accounts", [])
@@ -622,19 +802,11 @@ def get_active_hotspot_profile(cfg):
 
 
 def _get_no_suffix_operators(cfg):
-    try:
-        import schools
-        school_key = str(cfg.get("school", "jxnu")).strip()
-        profile = schools.get_profile(school_key)
-        if profile:
-            return set(profile.NO_SUFFIX_OPERATORS)
-    except Exception:
-        pass
-    return {"xn"}
+    metadata = _get_school_metadata(cfg)
+    return set(metadata.get("no_suffix_operators", []) or ["xn"])
 
 
 def resolve_active_items(cfg):
-
     campus = get_active_campus_account(cfg)
     hotspot = get_active_hotspot_profile(cfg)
 
@@ -685,6 +857,7 @@ def resolve_active_items(cfg):
 # load_config -- 主入口
 # ---------------------------------------------------------------------------
 
+
 def load_config():
     raw = load_json_raw_config()
 
@@ -713,6 +886,7 @@ def load_config():
     for key in LIST_KEYS:
         val = raw.get(key)
         cfg[key] = val if isinstance(val, list) else []
+    cfg[SCHOOL_EXTRA_KEY] = load_school_extra(raw)
 
     if str(raw.get("retry_cooldown_seconds", "")).strip() == "":
         cfg["retry_cooldown_seconds"] = str(
@@ -780,6 +954,7 @@ def load_config():
 # 错误本地化
 # ---------------------------------------------------------------------------
 
+
 def localize_error(message):
     mapping = {
         "challenge_expire_error": "挑战码已过期，请重试。",
@@ -806,6 +981,7 @@ def localize_error(message):
 # ---------------------------------------------------------------------------
 # 时间 / 策略查询
 # ---------------------------------------------------------------------------
+
 
 def normalize_hhmm(value, default_value):
     text = str(value or "").strip()
