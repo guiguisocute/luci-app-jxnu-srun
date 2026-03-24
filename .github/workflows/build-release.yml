@@ -104,23 +104,18 @@ jobs:
             --exclude "artifacts" \
             ./ openwrt/package/luci-app-jxnu-srun/
 
-      - name: Configure and compile split packages
+      - name: Configure
         working-directory: openwrt
         run: |
           echo "CONFIG_ALL_KMODS=n" >> .config
           echo "CONFIG_PACKAGE_jxnu-srun=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-jxnu-srun=y" >> .config
           make defconfig
-          make package/luci-app-jxnu-srun/{clean,compile} -j1 V=s
 
-      - name: Configure and compile bundle package
+      - name: Compile package
         working-directory: openwrt
         run: |
-          rm -f .config
-          echo "CONFIG_ALL_KMODS=n" >> .config
-          echo "CONFIG_PACKAGE_luci-app-jxnu-srun-bundle=y" >> .config
-          make defconfig
-          make package/luci-app-jxnu-srun-bundle/{clean,compile} -j1 V=s
+          make package/luci-app-jxnu-srun/{clean,compile} -j1 V=s
 
       - name: Collect artifact
         run: |

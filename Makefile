@@ -8,7 +8,7 @@ include $(INCLUDE_DIR)/package.mk
 
 RUNTIME_DEPENDS:=+python3-light
 LUCI_FILE_DEPENDS:=
-LUCI_PACKAGE_DEPENDS:=+jxnu-srun +luci-base $(LUCI_FILE_DEPENDS)
+LUCI_PACKAGE_DEPENDS:=+jxnu-srun $(LUCI_FILE_DEPENDS)
 BUNDLE_DEPENDS:=$(RUNTIME_DEPENDS) $(LUCI_FILE_DEPENDS)
 
 # ---------------------------------------------------------------------------
