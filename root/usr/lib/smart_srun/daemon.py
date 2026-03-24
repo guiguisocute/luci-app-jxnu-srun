@@ -114,12 +114,6 @@ def _handle_runtime_action_core(app_ctx, state, action):
         return True, message
 
     ok, message = run_switch(cfg, expect_hotspot=action_map[action])
-    action_result = "ok" if ok else "error"
-    target_mode = "hotspot" if action_map[action] else "campus"
-    if ok:
-        state["current_mode"] = target_mode
-        if not action_map[action]:
-            state["last_switch_ts"] = 0
     return ok, message
 
 
@@ -545,7 +539,7 @@ def _show_status(cfg):
     else:
         status_str = message or "离线"
 
-    print("=== JXNU SRun Status ===\n")
+    print("=== SMART SRun Status ===\n")
     print("  状态:   %s" % status_str)
     print("  模式:   %s" % mode_label)
     print("  账号:   %s" % account)
@@ -644,7 +638,7 @@ def _show_config():
     enabled = raw.get("enabled", "0") == "1"
     interval = raw.get("interval", "60")
 
-    print("=== JXNU SRun Configuration ===\n")
+    print("=== SMART SRun Configuration ===\n")
     print("School:    %s" % school)
     print("Enabled:   %s" % ("yes" if enabled else "no"))
     print("Interval:  %ss" % interval)
@@ -805,7 +799,7 @@ def _config_set(pairs, json_file=None):
     save_json_raw_config(raw)
     for key, old, val in changed:
         print("  %s: %s -> %s" % (key, old or "(empty)", val))
-    print("配置已保存。重启生效: /etc/init.d/jxnu_srun restart")
+    print("配置已保存。重启生效: /etc/init.d/smart_srun restart")
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1119,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="srunnet",
-        description="JXNU SRun campus network client for OpenWrt",
+        description="SMART SRun campus network client for OpenWrt",
     )
     sub = parser.add_subparsers(dest="command")
 

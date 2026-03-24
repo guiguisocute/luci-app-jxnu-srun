@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """
-JXNU SRun 校园网客户端入口。
+SMART SRun 校园网客户端入口。
 
 所有业务逻辑已拆分至独立模块：
   crypto.py      - 加密算法
@@ -13,7 +13,7 @@ JXNU SRun 校园网客户端入口。
   schools/       - 学校 Profile 插件
 
 本文件仅作为启动入口，保持路径兼容：
-  python3 -B /usr/lib/jxnu_srun/client.py daemon
+  python3 -B /usr/lib/smart_srun/client.py daemon
 """
 
 import os

@@ -30,9 +30,9 @@ def require_not_contains(text, needle, label, failures):
 def main():
     failures = []
 
-    lua_source = read_text("root/usr/lib/lua/luci/model/cbi/jxnu_srun.lua")
-    config_source = read_text("root/usr/lib/jxnu_srun/config.py")
-    daemon_source = read_text("root/usr/lib/jxnu_srun/daemon.py")
+    lua_source = read_text("root/usr/lib/lua/luci/model/cbi/smart_srun.lua")
+    config_source = read_text("root/usr/lib/smart_srun/config.py")
+    daemon_source = read_text("root/usr/lib/smart_srun/daemon.py")
 
     require_contains(
         lua_source,

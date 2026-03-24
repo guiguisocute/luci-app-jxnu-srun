@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LIB_DIR = REPO_ROOT / "root" / "usr" / "lib" / "jxnu_srun"
+LIB_DIR = REPO_ROOT / "root" / "usr" / "lib" / "smart_srun"
 SCHOOLS_DIR = LIB_DIR / "schools"
 
 if str(LIB_DIR) not in sys.path:

@@ -1,4 +1,4 @@
-module("luci.controller.jxnu_srun", package.seeall)
+module("luci.controller.smart_srun", package.seeall)
 
 local http = require "luci.http"
 local jsonc = require "luci.jsonc"
@@ -6,17 +6,17 @@ local sys = require "luci.sys"
 local util = require "luci.util"
 local fs = require "nixio.fs"
 
-local STATE_FILE = "/var/run/jxnu_srun/state.json"
-local ACTION_FILE = "/var/run/jxnu_srun/action.json"
-local LOG_FILE = "/var/log/jxnu_srun.log"
+local STATE_FILE = "/var/run/smart_srun/state.json"
+local ACTION_FILE = "/var/run/smart_srun/action.json"
+local LOG_FILE = "/var/log/smart_srun.log"
 local restore_manual_guarded_enabled
 local ACTION_STALE_SECONDS = 20
 
 function index()
-    entry({"admin", "services", "jxnu_srun"}, cbi("jxnu_srun"), _("JXNU SRun"), 80).dependent = true
-    entry({"admin", "services", "jxnu_srun", "status"}, call("action_status")).leaf = true
-    entry({"admin", "services", "jxnu_srun", "enqueue"}, call("action_enqueue")).leaf = true
-    entry({"admin", "services", "jxnu_srun", "log_tail"}, call("action_log_tail")).leaf = true
+    entry({"admin", "services", "smart_srun"}, cbi("smart_srun"), _("SMART SRun"), 80).dependent = true
+    entry({"admin", "services", "smart_srun", "status"}, call("action_status")).leaf = true
+    entry({"admin", "services", "smart_srun", "enqueue"}, call("action_enqueue")).leaf = true
+    entry({"admin", "services", "smart_srun", "log_tail"}, call("action_log_tail")).leaf = true
 end
 
 local function read_json_file(path)
@@ -57,7 +57,7 @@ local function collect_client_pids()
         if tostring(entry):match("^%d+$") then
             local cmdline = fs.readfile("/proc/" .. entry .. "/cmdline") or ""
             cmdline = cmdline:gsub("%z", " ")
-            if cmdline:find("/usr/lib/jxnu_srun/client.py", 1, true) then
+            if cmdline:find("/usr/lib/smart_srun/client.py", 1, true) then
                 pids[#pids + 1] = tostring(entry)
             end
         end
@@ -77,7 +77,7 @@ local function force_stop_client_processes()
 end
 
 local function handle_force_stop()
-    sys.call("/etc/init.d/jxnu_srun stop >/dev/null 2>&1")
+    sys.call("/etc/init.d/smart_srun stop >/dev/null 2>&1")
     local killed = force_stop_client_processes()
     remove_file(ACTION_FILE)
 
@@ -159,7 +159,7 @@ function action_status()
 end
 
 -- 表格 CRUD 需要的配置读写
-local CONFIG_FILE = "/usr/lib/jxnu_srun/config.json"
+local CONFIG_FILE = "/usr/lib/smart_srun/config.json"
 
 local GLOBAL_SCALAR_KEYS_SET = {}
 for _, k in ipairs({
@@ -288,7 +288,7 @@ function action_enqueue()
         state.action_started_at = requested_at
         state.updated_at = requested_at
         write_json_file(STATE_FILE, state)
-        sys.call("(/etc/init.d/jxnu_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
+        sys.call("(/etc/init.d/smart_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
         http.prepare_content("application/json")
         http.write(jsonc.stringify({ ok = true, message = daemon_actions[action], requested_at = requested_at }))
         return
@@ -435,7 +435,7 @@ function action_enqueue()
     if ok then
         save_config_json(cfg)
         if need_restart then
-            sys.call("(sleep 1; /etc/init.d/jxnu_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
+            sys.call("(sleep 1; /etc/init.d/smart_srun restart >/dev/null 2>&1) >/dev/null 2>&1 &")
         end
     end
 
@@ -553,7 +553,7 @@ function action_log_tail()
         lines = 1000
     end
 
-    local text = sys.exec("tail -n " .. lines .. " /var/log/jxnu_srun.log 2>/dev/null") or ""
+    local text = sys.exec("tail -n " .. lines .. " /var/log/smart_srun.log 2>/dev/null") or ""
     if since > 0 and text ~= "" then
         local kept = {}
         for line in text:gmatch("[^\n]+") do

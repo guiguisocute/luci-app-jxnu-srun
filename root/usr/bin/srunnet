@@ -1,8 +1,8 @@
 #!/bin/sh
-# JXNU SRun campus network client -- shortcut entry point.
+# SMART SRun campus network client -- shortcut entry point.
 # Default action: show status.
 
-PROG="/usr/lib/jxnu_srun/client.py"
+PROG="/usr/lib/smart_srun/client.py"
 PYTHON="$(command -v python3 2>/dev/null || command -v python3.11 2>/dev/null)"
 
 if [ -z "$PYTHON" ]; then

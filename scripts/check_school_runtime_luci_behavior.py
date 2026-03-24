@@ -5,7 +5,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LIB = ROOT / "root" / "usr" / "lib" / "jxnu_srun"
+LIB = ROOT / "root" / "usr" / "lib" / "smart_srun"
 if str(LIB) not in sys.path:
     sys.path.insert(0, str(LIB))
 

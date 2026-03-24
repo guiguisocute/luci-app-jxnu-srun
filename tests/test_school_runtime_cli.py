@@ -10,7 +10,7 @@ from unittest import mock
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULE_ROOT = os.path.join(REPO_ROOT, "root", "usr", "lib", "jxnu_srun")
+MODULE_ROOT = os.path.join(REPO_ROOT, "root", "usr", "lib", "smart_srun")
 
 if MODULE_ROOT not in sys.path:
     sys.path.insert(0, MODULE_ROOT)
@@ -516,7 +516,7 @@ class HotUpdateScriptTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as exc:
             hot_update.require_router_password()
 
-        self.assertIn("JXSRUN_ROUTER_PASSWORD", str(exc.exception))
+        self.assertIn("SMARTSRUN_ROUTER_PASSWORD", str(exc.exception))
 
     def test_hot_update_uploads_runtime_payload_dependency_closure(self):
         hot_update = load_hot_update_module(self)
@@ -524,20 +524,20 @@ class HotUpdateScriptTests(unittest.TestCase):
         uploaded = [item["local"] for item in hot_update.UPLOAD_TARGETS]
         expected_runtime_payload = {
             "root/usr/bin/srunnet",
-            "root/usr/lib/jxnu_srun/client.py",
-            "root/usr/lib/jxnu_srun/config.py",
-            "root/usr/lib/jxnu_srun/crypto.py",
-            "root/usr/lib/jxnu_srun/network.py",
-            "root/usr/lib/jxnu_srun/wireless.py",
-            "root/usr/lib/jxnu_srun/srun_auth.py",
-            "root/usr/lib/jxnu_srun/orchestrator.py",
-            "root/usr/lib/jxnu_srun/daemon.py",
-            "root/usr/lib/jxnu_srun/snapshot.py",
-            "root/usr/lib/jxnu_srun/school_runtime.py",
-            "root/usr/lib/jxnu_srun/defaults.json",
-            "root/usr/lib/jxnu_srun/schools/__init__.py",
-            "root/usr/lib/jxnu_srun/schools/_base.py",
-            "root/usr/lib/jxnu_srun/schools/jxnu.py",
+            "root/usr/lib/smart_srun/client.py",
+            "root/usr/lib/smart_srun/config.py",
+            "root/usr/lib/smart_srun/crypto.py",
+            "root/usr/lib/smart_srun/network.py",
+            "root/usr/lib/smart_srun/wireless.py",
+            "root/usr/lib/smart_srun/srun_auth.py",
+            "root/usr/lib/smart_srun/orchestrator.py",
+            "root/usr/lib/smart_srun/daemon.py",
+            "root/usr/lib/smart_srun/snapshot.py",
+            "root/usr/lib/smart_srun/school_runtime.py",
+            "root/usr/lib/smart_srun/defaults.json",
+            "root/usr/lib/smart_srun/schools/__init__.py",
+            "root/usr/lib/smart_srun/schools/_base.py",
+            "root/usr/lib/smart_srun/schools/jxnu.py",
         }
 
         self.assertTrue(
@@ -548,7 +548,7 @@ class HotUpdateScriptTests(unittest.TestCase):
     def test_hot_update_forces_lf_for_init_script_upload(self):
         hot_update = load_hot_update_module(self)
 
-        self.assertIn("/etc/init.d/jxnu_srun", hot_update.FORCE_LF_TARGETS)
+        self.assertIn("/etc/init.d/smart_srun", hot_update.FORCE_LF_TARGETS)
         self.assertIn("/usr/bin/srunnet", hot_update.FORCE_LF_TARGETS)
 
     def test_hot_update_can_read_luci_login_page_from_http_403(self):
@@ -585,13 +585,13 @@ class HotUpdateScriptTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "/usr/lib/jxnu_srun/school_runtime.py" in command
+                "/usr/lib/smart_srun/school_runtime.py" in command
                 for command in syntax_commands
             )
         )
         self.assertTrue(
             any(
-                "/usr/lib/jxnu_srun/schools/__init__.py" in command
+                "/usr/lib/smart_srun/schools/__init__.py" in command
                 for command in syntax_commands
             )
         )
@@ -604,7 +604,7 @@ class HotUpdateScriptTests(unittest.TestCase):
         )
         self.assertIn("srunnet schools", sanity_commands)
         self.assertIn("srunnet schools inspect --selected", sanity_commands)
-        self.assertIn("/etc/init.d/jxnu_srun restart", restart_commands)
+        self.assertIn("/etc/init.d/smart_srun restart", restart_commands)
         self.assertIn("/etc/init.d/uwsgi restart", restart_commands)
 
     def test_hot_update_restores_executable_permissions_for_entrypoints(self):
@@ -620,15 +620,15 @@ class HotUpdateScriptTests(unittest.TestCase):
 
         run_remote.assert_called_once_with(
             mock.ANY,
-            "chmod 755 /usr/bin/srunnet /etc/init.d/jxnu_srun",
+            "chmod 755 /usr/bin/srunnet /etc/init.d/smart_srun",
         )
 
     def test_verify_luci_page_accepts_school_runtime_markup_without_diagnostics(self):
         hot_update = load_hot_update_module(self)
         page = """
         <html>
-            <input id="cbid.jxnu_srun.main.school" />
-            <input id="cbid.jxnu_srun.main._school_extra_region" />
+            <input id="cbid.smart_srun.main.school" />
+            <input id="cbid.smart_srun.main._school_extra_region" />
         </html>
         """
 

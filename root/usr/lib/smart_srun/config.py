@@ -11,10 +11,10 @@ import time
 from datetime import datetime, timedelta, timezone
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-LOG_FILE = "/var/log/jxnu_srun.log"
-JSON_CONFIG_FILE = "/usr/lib/jxnu_srun/config.json"
-STATE_FILE = "/var/run/jxnu_srun/state.json"
-ACTION_FILE = "/var/run/jxnu_srun/action.json"
+LOG_FILE = "/var/log/smart_srun.log"
+JSON_CONFIG_FILE = "/usr/lib/smart_srun/config.json"
+STATE_FILE = "/var/run/smart_srun/state.json"
+ACTION_FILE = "/var/run/smart_srun/action.json"
 LOG_MAX_BYTES = 512 * 1024
 CONNECTIVITY_CACHE_SECONDS = 15
 SWITCH_DELAY_SECONDS = 2

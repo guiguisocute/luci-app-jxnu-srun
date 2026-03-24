@@ -13,14 +13,14 @@ from urllib import parse, request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ROUTER_HOST = os.environ.get("JXSRUN_ROUTER_HOST", "10.0.0.1")
-ROUTER_USER = os.environ.get("JXSRUN_ROUTER_USER", "root")
-ROUTER_PASSWORD = os.environ.get("JXSRUN_ROUTER_PASSWORD")
+ROUTER_HOST = os.environ.get("SMARTSRUN_ROUTER_HOST", "10.0.0.1")
+ROUTER_USER = os.environ.get("SMARTSRUN_ROUTER_USER", "root")
+ROUTER_PASSWORD = os.environ.get("SMARTSRUN_ROUTER_PASSWORD")
 LUCI_BASE_URL = os.environ.get(
-    "JXSRUN_LUCI_BASE_URL", "http://%s/cgi-bin/luci" % ROUTER_HOST
+    "SMARTSRUN_LUCI_BASE_URL", "http://%s/cgi-bin/luci" % ROUTER_HOST
 )
-FORCE_LF_TARGETS = {"/etc/init.d/jxnu_srun", "/usr/bin/srunnet"}
-EXECUTABLE_TARGETS = ["/usr/bin/srunnet", "/etc/init.d/jxnu_srun"]
+FORCE_LF_TARGETS = {"/etc/init.d/smart_srun", "/usr/bin/srunnet"}
+EXECUTABLE_TARGETS = ["/usr/bin/srunnet", "/etc/init.d/smart_srun"]
 
 RUNTIME_TARGETS = [
     {
@@ -28,75 +28,75 @@ RUNTIME_TARGETS = [
         "remote": "/usr/bin/srunnet",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/client.py",
-        "remote": "/usr/lib/jxnu_srun/client.py",
+        "local": "root/usr/lib/smart_srun/client.py",
+        "remote": "/usr/lib/smart_srun/client.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/config.py",
-        "remote": "/usr/lib/jxnu_srun/config.py",
+        "local": "root/usr/lib/smart_srun/config.py",
+        "remote": "/usr/lib/smart_srun/config.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/crypto.py",
-        "remote": "/usr/lib/jxnu_srun/crypto.py",
+        "local": "root/usr/lib/smart_srun/crypto.py",
+        "remote": "/usr/lib/smart_srun/crypto.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/network.py",
-        "remote": "/usr/lib/jxnu_srun/network.py",
+        "local": "root/usr/lib/smart_srun/network.py",
+        "remote": "/usr/lib/smart_srun/network.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/wireless.py",
-        "remote": "/usr/lib/jxnu_srun/wireless.py",
+        "local": "root/usr/lib/smart_srun/wireless.py",
+        "remote": "/usr/lib/smart_srun/wireless.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/srun_auth.py",
-        "remote": "/usr/lib/jxnu_srun/srun_auth.py",
+        "local": "root/usr/lib/smart_srun/srun_auth.py",
+        "remote": "/usr/lib/smart_srun/srun_auth.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/orchestrator.py",
-        "remote": "/usr/lib/jxnu_srun/orchestrator.py",
+        "local": "root/usr/lib/smart_srun/orchestrator.py",
+        "remote": "/usr/lib/smart_srun/orchestrator.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/daemon.py",
-        "remote": "/usr/lib/jxnu_srun/daemon.py",
+        "local": "root/usr/lib/smart_srun/daemon.py",
+        "remote": "/usr/lib/smart_srun/daemon.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/snapshot.py",
-        "remote": "/usr/lib/jxnu_srun/snapshot.py",
+        "local": "root/usr/lib/smart_srun/snapshot.py",
+        "remote": "/usr/lib/smart_srun/snapshot.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/school_runtime.py",
-        "remote": "/usr/lib/jxnu_srun/school_runtime.py",
+        "local": "root/usr/lib/smart_srun/school_runtime.py",
+        "remote": "/usr/lib/smart_srun/school_runtime.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/defaults.json",
-        "remote": "/usr/lib/jxnu_srun/defaults.json",
+        "local": "root/usr/lib/smart_srun/defaults.json",
+        "remote": "/usr/lib/smart_srun/defaults.json",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/schools/__init__.py",
-        "remote": "/usr/lib/jxnu_srun/schools/__init__.py",
+        "local": "root/usr/lib/smart_srun/schools/__init__.py",
+        "remote": "/usr/lib/smart_srun/schools/__init__.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/schools/_base.py",
-        "remote": "/usr/lib/jxnu_srun/schools/_base.py",
+        "local": "root/usr/lib/smart_srun/schools/_base.py",
+        "remote": "/usr/lib/smart_srun/schools/_base.py",
     },
     {
-        "local": "root/usr/lib/jxnu_srun/schools/jxnu.py",
-        "remote": "/usr/lib/jxnu_srun/schools/jxnu.py",
+        "local": "root/usr/lib/smart_srun/schools/jxnu.py",
+        "remote": "/usr/lib/smart_srun/schools/jxnu.py",
     },
 ]
 
 LUA_AND_SERVICE_TARGETS = [
     {
-        "local": "root/usr/lib/lua/luci/controller/jxnu_srun.lua",
-        "remote": "/usr/lib/lua/luci/controller/jxnu_srun.lua",
+        "local": "root/usr/lib/lua/luci/controller/smart_srun.lua",
+        "remote": "/usr/lib/lua/luci/controller/smart_srun.lua",
     },
     {
-        "local": "root/usr/lib/lua/luci/model/cbi/jxnu_srun.lua",
-        "remote": "/usr/lib/lua/luci/model/cbi/jxnu_srun.lua",
+        "local": "root/usr/lib/lua/luci/model/cbi/smart_srun.lua",
+        "remote": "/usr/lib/lua/luci/model/cbi/smart_srun.lua",
     },
     {
-        "local": "root/etc/init.d/jxnu_srun",
-        "remote": "/etc/init.d/jxnu_srun",
+        "local": "root/etc/init.d/smart_srun",
+        "remote": "/etc/init.d/smart_srun",
     },
 ]
 
@@ -113,21 +113,21 @@ def build_remote_commands():
     return {
         "syntax_checks": [
             "python3 -m py_compile %s" % " ".join(python_files),
-            "lua -e \"assert(loadfile('/usr/lib/lua/luci/controller/jxnu_srun.lua'))\"",
-            "lua -e \"assert(loadfile('/usr/lib/lua/luci/model/cbi/jxnu_srun.lua'))\"",
-            "sh -n /etc/init.d/jxnu_srun",
+            "lua -e \"assert(loadfile('/usr/lib/lua/luci/controller/smart_srun.lua'))\"",
+            "lua -e \"assert(loadfile('/usr/lib/lua/luci/model/cbi/smart_srun.lua'))\"",
+            "sh -n /etc/init.d/smart_srun",
         ],
         "cache_cleanup": [
             "rm -rf /tmp/luci-*",
-            "rm -f /usr/lib/jxnu_srun/__pycache__/*.pyc",
-            "rm -f /usr/lib/jxnu_srun/schools/__pycache__/*.pyc",
+            "rm -f /usr/lib/smart_srun/__pycache__/*.pyc",
+            "rm -f /usr/lib/smart_srun/schools/__pycache__/*.pyc",
         ],
         "restart": [
-            "/etc/init.d/jxnu_srun restart",
+            "/etc/init.d/smart_srun restart",
             "/etc/init.d/uwsgi restart",
         ],
         "sanity_checks": [
-            "python3 -c \"import sys; sys.path.insert(0, '/usr/lib/jxnu_srun'); import school_runtime; import schools; import srun_auth; import orchestrator; import snapshot; import daemon; print('runtime-loader-import-ok')\"",
+            "python3 -c \"import sys; sys.path.insert(0, '/usr/lib/smart_srun'); import school_runtime; import schools; import srun_auth; import orchestrator; import snapshot; import daemon; print('runtime-loader-import-ok')\"",
             "srunnet status",
             "srunnet schools",
             "srunnet schools inspect --selected",
@@ -139,7 +139,7 @@ def require_router_password():
     if ROUTER_PASSWORD:
         return ROUTER_PASSWORD
     raise RuntimeError(
-        "JXSRUN_ROUTER_PASSWORD is required; export it in the environment before running hot_update.py"
+        "SMARTSRUN_ROUTER_PASSWORD is required; export it in the environment before running hot_update.py"
     )
 
 
@@ -269,7 +269,7 @@ def login_luci(opener):
 
 
 def fetch_luci_page(opener):
-    url = LUCI_BASE_URL + "/admin/services/jxnu_srun"
+    url = LUCI_BASE_URL + "/admin/services/smart_srun"
     _, body, _ = open_url(opener, url, timeout=15)
     return body
 
@@ -281,7 +281,7 @@ def verify_luci_page(expected_descriptor_count):
         raise RuntimeError("LuCI login failed")
 
     page = fetch_luci_page(opener)
-    required = [("school selector", "cbid.jxnu_srun.main.school")]
+    required = [("school selector", "cbid.smart_srun.main.school")]
     if expected_descriptor_count > 0:
         required.append(("school_extra fields", "_school_extra_"))
 

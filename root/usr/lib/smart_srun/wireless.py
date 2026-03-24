@@ -841,7 +841,7 @@ def switch_sta_profile(cfg, expect_hotspot):
         return False, "写入无线配置失败。"
 
     settle_delay = min(
-        max(get_switch_ready_timeout_seconds(cfg), 1), SWITCH_DELAY_SECONDS
+        SWITCH_DELAY_SECONDS, get_switch_ready_timeout_seconds(cfg)
     )
     if settle_delay > 0:
         time.sleep(settle_delay)

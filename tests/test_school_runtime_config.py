@@ -8,7 +8,7 @@ from unittest import mock
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKTREE_ROOT = os.path.dirname(THIS_DIR)
-MODULE_DIR = os.path.join(WORKTREE_ROOT, "root", "usr", "lib", "jxnu_srun")
+MODULE_DIR = os.path.join(WORKTREE_ROOT, "root", "usr", "lib", "smart_srun")
 
 if MODULE_DIR not in sys.path:
     sys.path.insert(0, MODULE_DIR)

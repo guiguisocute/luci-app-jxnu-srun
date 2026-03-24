@@ -3,8 +3,8 @@
 START=99
 USE_PROCD=1
 
-SERVICE_NAME="jxnu_srun"
-PROG="/usr/lib/jxnu_srun/client.py"
+SERVICE_NAME="smart_srun"
+PROG="/usr/lib/smart_srun/client.py"
 
 find_python() {
 	command -v python3 2>/dev/null || command -v python3.11 2>/dev/null

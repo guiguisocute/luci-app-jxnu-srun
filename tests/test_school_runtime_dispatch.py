@@ -5,7 +5,7 @@ from unittest import mock
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULE_ROOT = os.path.join(REPO_ROOT, "root", "usr", "lib", "jxnu_srun")
+MODULE_ROOT = os.path.join(REPO_ROOT, "root", "usr", "lib", "smart_srun")
 
 if MODULE_ROOT not in sys.path:
     sys.path.insert(0, MODULE_ROOT)
