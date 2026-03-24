@@ -971,7 +971,7 @@ function manual_login.cfgvalue()
       }
 
       if (action === 'manual_logout') {
-        if (statusData.action_result === 'ok' && statusData.connectivity_level !== 'online') {
+        if (statusData.action_result === 'ok') {
           unlock(statusData.status || '登出成功', true);
           return true;
         }
@@ -1473,7 +1473,7 @@ window.jxnuEditCampus = function(id) {
     '<div class="jxnu-native-row"><label>标签（选填）</label><input id="jm-label" value="' + (item.label || '') + '"></div>' +
     '<div class="jxnu-native-row"><label>学工号</label><input id="jm-user_id" value="' + (item.user_id || '') + '"></div>' +
     '<div class="jxnu-native-row"><label>运营商</label><select id="jm-operator">' + opOptions + '</select></div>' +
-    '<div class="jxnu-native-row"><label>运营商后缀（选填）</label><input id="jm-operator_suffix" value="' + (item.operator_suffix || '') + '" placeholder=""></div>' +
+    '<div class="jxnu-native-row"><label>运营商后缀（留空则为默认）</label><input id="jm-operator_suffix" value="' + (item.operator_suffix || '') + '" placeholder=""></div>' +
     '<div class="jxnu-native-row"><label>接入方式</label><select id="jm-access_mode"><option value="wifi"' + (((item.access_mode || 'wifi')==='wifi')?' selected':'') + '>无线</option><option value="wired"' + ((item.access_mode==='wired')?' selected':'') + '>有线（WAN）</option></select></div>' +
     '<div class="jxnu-native-row"><label>密码</label><div id="jm-password-field"></div></div>' +
     '<div class="jxnu-native-row"><label>认证地址</label><input id="jm-base_url" value="' + (item.base_url || 'http://172.17.1.2') + '"></div>' +

@@ -32,16 +32,10 @@ from network import (
     test_internet_connectivity,
 )
 from wireless import (
-    build_expected_profile,
     detect_runtime_mode,
     disable_managed_sta_sections,
     ensure_expected_profile,
-    get_active_sta_section,
-    get_preferred_profile_radio,
-    get_radio_for_section,
-    get_sta_profile_from_section,
     parse_wireless_iface_data,
-    profiles_match,
     switch_to_campus,
     wait_for_network_interface_ipv4,
 )
@@ -324,12 +318,8 @@ def wait_for_manual_logout_ready(
             app_ctx, bind_ip=bind_ip
         )
         if not online:
-            internet_ok, internet_msg = test_internet_connectivity(timeout=2)
-            if not internet_ok:
-                return True, "已确认离线，互联网连通性检查结果=不可达"
-            last_message = "离线后互联网仍可达（%s）" % (internet_msg or "可达")
-        else:
-            last_message = localize_error(offline_msg)
+            return True, "已确认离线"
+        last_message = localize_error(offline_msg)
 
         if idx + 1 < attempts:
             time.sleep(max(int(delay_seconds), 1))
@@ -391,21 +381,6 @@ def clean_slate_for_manual_login(cfg, online_user=""):
         return True, ""
 
     active_data = parse_wireless_iface_data()
-    active_section = get_active_sta_section(cfg, active_data)
-    active_profile = (
-        get_sta_profile_from_section(active_section, active_data)
-        if active_section
-        else {}
-    )
-    target_profile = build_expected_profile(cfg, expect_hotspot=False)
-    target_radio = get_preferred_profile_radio(cfg, False, active_data)
-    active_radio = get_radio_for_section(active_section, active_data)
-
-    profile_changed = False
-    if not profiles_match(active_profile, target_profile):
-        profile_changed = True
-    elif target_radio and active_radio and target_radio != active_radio:
-        profile_changed = True
 
     if online_user:
         log(
@@ -441,22 +416,21 @@ def clean_slate_for_manual_login(cfg, online_user=""):
         )
         return False, message or "禁用历史 STA 接口失败"
 
-    if online_user or profile_changed:
+    log(
+        "INFO",
+        "manual_preclean_done",
+        "managed STA disabled, rebuilding campus connection",
+    )
+    ok2, sw_msg = switch_to_campus(cfg)
+    if not ok2:
         log(
-            "INFO",
-            "manual_preclean_done",
-            "managed STA disabled, rebuilding campus connection",
+            "ERROR",
+            "manual_login_failed",
+            "preclean failed: could not rebuild campus connection",
+            reason=sw_msg or "unknown",
         )
-        ok2, sw_msg = switch_to_campus(cfg)
-        if not ok2:
-            log(
-                "ERROR",
-                "manual_login_failed",
-                "preclean failed: could not rebuild campus connection",
-                reason=sw_msg or "unknown",
-            )
-            return False, sw_msg or "切换校园网失败"
-        log("INFO", "manual_preclean_done", "campus wireless profile rebuilt")
+        return False, sw_msg or "切换校园网失败"
+    log("INFO", "manual_preclean_done", "campus wireless profile rebuilt")
 
     return True, ""
 

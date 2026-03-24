@@ -8,7 +8,7 @@ from _base import SchoolProfile
 class Profile(SchoolProfile):
     NAME = "默认配置"
     SHORT_NAME = "jxnu"
-    DESCRIPTION = "江西师范大学（瑶湖/青山湖校区）"
+    DESCRIPTION = "江西师范大学，南昌大学"
     CONTRIBUTORS = ("@matthewlu070111", "@guiguisocute")
 
     ALPHA = "LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA"
