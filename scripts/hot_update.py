@@ -41,6 +41,10 @@ RUNTIME_TARGETS = [
         "remote": "/usr/lib/smart_srun/config.py",
     },
     {
+        "local": "root/usr/lib/smart_srun/version_info.py",
+        "remote": "/usr/lib/smart_srun/version_info.py",
+    },
+    {
         "local": "root/usr/lib/smart_srun/crypto.py",
         "remote": "/usr/lib/smart_srun/crypto.py",
     },

@@ -545,8 +545,12 @@ local function bind_text(opt, key, normalize_fn)
 end
 
 local quiet_desc = string.format("当前下线/上线时间：%s / %s", cfg.quiet_start or "00:00", cfg.quiet_end or "06:00")
+local version_suffix = string.format(
+    '<span id="smart-srun-version-info" style="margin-left:8px;color:#6b7280;font-size:13px;font-weight:400;vertical-align:middle;">- 当前版本：<a id="smart-srun-version-link" href="https://github.com/matthewlu070111/smart-srun/releases" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none;">%s<span id="smart-srun-update-dot" style="display:none;width:8px;height:8px;margin-left:6px;border-radius:999px;background:#dc2626;vertical-align:middle;"></span></a></span>',
+    util.pcdata(schema.installed_package_display_text())
+)
 
-m = Map("smart_srun", "智慧深澜", "深澜校园网认证配置")
+m = Map("smart_srun", "智慧深澜", "深澜校园网认证配置 " .. version_suffix)
 if not m.uci:get("smart_srun", "main") then
     m.uci:section("smart_srun", "main", "main")
     m.uci:save("smart_srun")

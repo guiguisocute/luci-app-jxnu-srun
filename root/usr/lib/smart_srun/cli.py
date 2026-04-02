@@ -11,6 +11,7 @@ import sys
 import daemon
 import school_runtime
 import schools
+import version_info
 
 
 def main():
@@ -22,6 +23,11 @@ def main():
     parser = argparse.ArgumentParser(
         prog="srunnet",
         description="SMART SRun campus network client for OpenWrt",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=version_info.get_cli_version_string(),
     )
     sub = parser.add_subparsers(dest="command")
 

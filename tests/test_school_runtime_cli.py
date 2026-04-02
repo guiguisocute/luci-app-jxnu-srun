@@ -17,6 +17,7 @@ if MODULE_ROOT not in sys.path:
 
 
 import daemon
+import version_info
 import school_runtime
 import schools
 
@@ -402,6 +403,23 @@ class SchoolRuntimeCliTests(unittest.TestCase):
         self.assertEqual(output, "")
         tail_log.assert_called_once_with(0)
 
+    def test_version_flag_prints_cli_package_and_version(self):
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", ["srunnet", "--version"]),
+            mock.patch.object(
+                version_info,
+                "get_cli_version_string",
+                return_value="luci-app-smart-srun-bundle v1.3.0-r1",
+            ),
+            redirect_stdout(stdout),
+        ):
+            with self.assertRaises(SystemExit) as exc:
+                daemon.main()
+
+        self.assertEqual(0, exc.exception.code)
+        self.assertEqual("luci-app-smart-srun-bundle v1.3.0-r1\n", stdout.getvalue())
+
     def test_schools_command_works_when_runtime_resolution_is_broken(self):
         payload = [{"short_name": "jxnu"}]
         stdout = io.StringIO()
@@ -695,6 +713,35 @@ class LuciSourceHardeningTests(unittest.TestCase):
         self.assertNotIn("safe_json_for_script", source)
         self.assertNotIn('<script type="text/javascript">', source)
 
+    def test_cbi_model_renders_version_badge_from_schema_module(self):
+        source = read_repo_text(
+            "root", "usr", "lib", "lua", "luci", "model", "cbi", "smart_srun.lua"
+        )
+        js_source = read_repo_text(
+            "root", "www", "luci-static", "resources", "smart_srun.js"
+        )
+        schema_source = read_repo_text(
+            "root", "usr", "lib", "lua", "luci", "smart_srun", "schema.lua"
+        )
+
+        self.assertIn("schema.installed_package_display_text()", source)
+        self.assertIn("深澜校园网认证配置", source)
+        self.assertIn("当前版本：", source)
+        self.assertIn("smart-srun-version-info", source)
+        self.assertIn("smart-srun-update-dot", source)
+        self.assertIn("Bundle 版", schema_source)
+        self.assertIn("标准版", schema_source)
+        self.assertIn(
+            "https://api.github.com/repos/matthewlu070111/smart-srun/releases/latest",
+            js_source,
+        )
+        self.assertIn(
+            "https://github.com/matthewlu070111/smart-srun/releases",
+            js_source,
+        )
+        self.assertIn("smart-srun-update-dot", js_source)
+        self.assertIn("smart-srun-version-link", js_source)
+
     def test_luci_model_and_controller_share_schema_module(self):
         controller_source = read_repo_text(
             "root", "usr", "lib", "lua", "luci", "controller", "smart_srun.lua"
@@ -766,6 +813,7 @@ class LuciSourceHardeningTests(unittest.TestCase):
             "root/usr/lib/smart_srun/daemon.py",
             "root/usr/lib/smart_srun/snapshot.py",
             "root/usr/lib/smart_srun/school_runtime.py",
+            "root/usr/lib/smart_srun/version_info.py",
             "root/usr/lib/smart_srun/defaults.json",
             "root/usr/lib/smart_srun/schools/__init__.py",
             "root/usr/lib/smart_srun/schools/_base.py",

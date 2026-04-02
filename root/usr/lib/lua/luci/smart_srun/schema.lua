@@ -3,6 +3,8 @@ local jsonc = require "luci.jsonc"
 local nixio = require "nixio"
 
 local DEFAULTS_FILE = "/usr/lib/smart_srun/defaults.json"
+local OPKG_STATUS_FILE = "/usr/lib/opkg/status"
+local DEFAULT_VERSION = "v0.0.0-r1"
 
 local M = {}
 
@@ -76,6 +78,48 @@ function M.with_file_lock(path, callback)
         error(a)
     end
     return a, b, c
+end
+
+local function normalize_version_string(raw)
+    local value = tostring(raw or "")
+    local version, release = value:match("^v?([^-]+)-r?(%d+)$")
+    if version and release then
+        return string.format("v%s-r%s", version, release)
+    end
+    return DEFAULT_VERSION
+end
+
+local function package_versions()
+    local versions = {}
+    local text = (fs.readfile(OPKG_STATUS_FILE) or "") .. "\n\n"
+    for block in text:gmatch("(.-)\n\n") do
+        local package_name = block:match("\n?Package:%s*([^\r\n]+)")
+        if package_name then
+            versions[package_name] = block:match("\n?Version:%s*([^\r\n]+)") or ""
+        end
+    end
+    return versions
+end
+
+function M.installed_package_name()
+    local versions = package_versions()
+    if versions["luci-app-smart-srun-bundle"] then
+        return "luci-app-smart-srun-bundle"
+    end
+    if versions["luci-app-smart-srun"] then
+        return "luci-app-smart-srun"
+    end
+    return "smart-srun"
+end
+
+function M.installed_package_display_text()
+    local versions = package_versions()
+    local package_name = M.installed_package_name()
+    local label = package_name == "luci-app-smart-srun-bundle" and "Bundle 版"
+        or package_name == "luci-app-smart-srun" and "标准版"
+        or "CLI 版"
+    local version = normalize_version_string(versions[package_name] or "")
+    return string.format("%s %s", label, version)
 end
 
 return M

@@ -7,6 +7,8 @@
   var modalType = '';
   var modalEditId = '';
   var modalSaveHandler = null;
+  var RELEASES_API_URL = 'https://api.github.com/repos/matthewlu070111/smart-srun/releases/latest';
+  var RELEASES_PAGE_URL = 'https://github.com/matthewlu070111/smart-srun/releases';
 
   function readText(id) {
     var node = document.getElementById(id);
@@ -48,6 +50,59 @@
       }
     };
     xhr.send(null);
+  }
+
+  function normalizeVersionText(value) {
+    var text = String(value == null ? '' : value).trim();
+    var match = text.match(/^v?([^-]+)-r?(\d+)$/);
+    if (!match) {
+      match = text.match(/^v?(\d+(?:\.\d+)+)$/);
+      if (!match) return '';
+      return { base: match[1], release: 0 };
+    }
+    return { base: match[1], release: parseInt(match[2], 10) || 0 };
+  }
+
+  function compareVersionParts(left, right) {
+    var leftParts = String(left || '0').split('.');
+    var rightParts = String(right || '0').split('.');
+    var length = Math.max(leftParts.length, rightParts.length);
+    for (var i = 0; i < length; i++) {
+      var leftNum = parseInt(leftParts[i] || '0', 10) || 0;
+      var rightNum = parseInt(rightParts[i] || '0', 10) || 0;
+      if (leftNum !== rightNum) return leftNum - rightNum;
+    }
+    return 0;
+  }
+
+  function isRemoteNewer(localVersion, remoteTag) {
+    var localInfo = normalizeVersionText(localVersion);
+    var remoteInfo = normalizeVersionText(remoteTag);
+    if (!localInfo || !remoteInfo) return false;
+    var baseCompare = compareVersionParts(localInfo.base, remoteInfo.base);
+    if (baseCompare !== 0) return baseCompare < 0;
+    return (localInfo.release || 0) < (remoteInfo.release || 0);
+  }
+
+  function initVersionNotice() {
+    var container = document.getElementById('smart-srun-version-info');
+    var link = document.getElementById('smart-srun-version-link');
+    var dot = document.getElementById('smart-srun-update-dot');
+    if (!container || !link || !dot || window.__smartSrunVersionInit) return;
+    window.__smartSrunVersionInit = true;
+
+    var text = container.textContent || '';
+    var match = text.match(/v\d[^\s]*/);
+    var localVersion = match ? match[0] : '';
+    link.href = RELEASES_PAGE_URL;
+    if (!localVersion) return;
+
+    fetchJson(RELEASES_API_URL, function(err, data) {
+      if (err || !data || typeof data.tag_name !== 'string') return;
+      if (!isRemoteNewer(localVersion, data.tag_name)) return;
+      dot.style.display = 'inline-block';
+      link.title = '发现新版本：' + data.tag_name;
+    });
   }
 
   window.smartFetchJson = fetchJson;
@@ -739,6 +794,7 @@
   }
 
   function initAll() {
+    initVersionNotice();
     initTables();
     initSchoolInfo();
     initOverview();
