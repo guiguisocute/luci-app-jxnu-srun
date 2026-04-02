@@ -910,5 +910,15 @@ class CliSplitSourceTests(unittest.TestCase):
         self.assertNotIn("import argparse", daemon_source)
 
 
+class PackagingLayoutTests(unittest.TestCase):
+    def test_makefile_installs_new_luci_schema_and_static_asset(self):
+        makefile = read_repo_text("Makefile")
+
+        self.assertIn("/usr/lib/lua/luci/smart_srun", makefile)
+        self.assertIn("root/usr/lib/lua/luci/smart_srun/*.lua", makefile)
+        self.assertIn("/www/luci-static/resources", makefile)
+        self.assertIn("root/www/luci-static/resources/*.js", makefile)
+
+
 if __name__ == "__main__":
     unittest.main()
